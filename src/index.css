@@ -1,0 +1,46 @@
+@import "tailwindcss";
+
+@layer base {
+  body {
+    font-family: 'Fredoka', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    touch-action: manipulation;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+}
+
+.font-game {
+  font-family: 'Fredoka', system-ui, sans-serif;
+}
+
+.font-display {
+  font-family: 'Orbitron', monospace, sans-serif;
+}
+
+@keyframes blackFlashPulse {
+  0% { transform: scale(1); filter: drop-shadow(0 0 10px #ff0033); }
+  50% { transform: scale(1.08); filter: drop-shadow(0 0 25px #000) drop-shadow(0 0 15px #ff1a3c); }
+  100% { transform: scale(1); filter: drop-shadow(0 0 10px #ff0033); }
+}
+
+.animate-black-flash {
+  animation: blackFlashPulse 0.4s ease-in-out infinite;
+}
+
+@keyframes warningBlink {
+  0%, 100% { opacity: 0.9; }
+  50% { opacity: 0.2; }
+}
+
+.animate-warning {
+  animation: warningBlink 0.3s ease-in-out infinite;
+}
+
+/* Custom scrollbar hide for clean game viewport */
+::-webkit-scrollbar {
+  display: none;
+}
+* {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
