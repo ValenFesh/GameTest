@@ -4,6 +4,8 @@ import {
   BlackFlashStrike,
   Boss,
   BossAttack,
+  BossDrone,
+  CharacterSkinId,
   CinematicState,
   DamageNumber,
   GameStage,
@@ -13,10 +15,27 @@ import {
   Player,
   Projectile,
 } from '../types/game';
+import {
+  CHARACTER_SKINS,
+  getSavedNanovalenWins,
+  saveNanovalenWins,
+  getSavedSelectedSkin,
+  saveSelectedSkin,
+  isSkinUnlocked,
+  getAdminUnlockAll,
+  saveAdminUnlockAll,
+} from './skins';
 
 export class GameEngine {
   public width: number = 960;
   public height: number = 600;
+
+  public currentSkin: CharacterSkinId = 'catvalen';
+  public nanovalenWins: number = 0;
+  public adminUnlockAll: boolean = false;
+  public godMode: boolean = false;
+  public infiniteHeals: boolean = false;
+  public noCooldowns: boolean = false;
 
   public stage: GameStage = 'start';
   public stageProgress: number = 0; // 0 to 100
@@ -25,6 +44,7 @@ export class GameEngine {
 
   public player: Player;
   public boss: Boss | null = null;
+  public drones: BossDrone[] = [];
   public cinematic: CinematicState | null = null;
   public obstacles: Obstacle[] = [];
   public projectiles: Projectile[] = [];
@@ -55,12 +75,63 @@ export class GameEngine {
   constructor(width: number, height: number) {
     this.width = width;
     this.height = height;
-    this.player = this.createInitialPlayer();
+    this.nanovalenWins = getSavedNanovalenWins();
+    this.adminUnlockAll = getAdminUnlockAll();
+    this.currentSkin = getSavedSelectedSkin();
+    this.player = this.createInitialPlayer(this.currentSkin);
   }
 
   public setCallbacks(onGameOver: () => void, onVictory: () => void) {
     this.onGameOverCallback = onGameOver;
     this.onVictoryCallback = onVictory;
+  }
+
+  public setAdminUnlockAll(val: boolean) {
+    this.adminUnlockAll = val;
+    saveAdminUnlockAll(val);
+  }
+
+  public setGodMode(val: boolean) {
+    this.godMode = val;
+  }
+
+  public setInfiniteHeals(val: boolean) {
+    this.infiniteHeals = val;
+    if (val && this.player) {
+      this.player.healsRemaining = this.player.maxHeals;
+    }
+  }
+
+  public setNoCooldowns(val: boolean) {
+    this.noCooldowns = val;
+  }
+
+  public instaKillBoss() {
+    if (this.boss && (this.stage === 'boss' || this.stage === 'boss_intro')) {
+      this.applyDamageToBoss(99999, 'punch', this.boss.x, this.boss.y, true);
+    }
+  }
+
+  public jumpToStage(targetStage: GameStage) {
+    if (targetStage === 'start') {
+      this.resetToMenu();
+    } else {
+      this.startStage(targetStage);
+    }
+  }
+
+  public selectSkin(skinId: CharacterSkinId): boolean {
+    if (!CHARACTER_SKINS[skinId]) return false;
+    this.currentSkin = skinId;
+    saveSelectedSkin(skinId);
+    this.player = this.createInitialPlayer(skinId);
+    return true;
+  }
+
+  public setNanovalenWins(wins: number) {
+    this.nanovalenWins = Math.max(0, wins);
+    saveNanovalenWins(this.nanovalenWins);
+    this.stats.nanovalenWins = this.nanovalenWins;
   }
 
   public resize(width: number, height: number) {
@@ -71,7 +142,10 @@ export class GameEngine {
     if (this.player.y > height - 80) this.player.y = height - 80;
   }
 
-  private createInitialPlayer(): Player {
+  public createInitialPlayer(skinId: CharacterSkinId = this.currentSkin): Player {
+    const skinConfig = CHARACTER_SKINS[skinId] || CHARACTER_SKINS.catvalen;
+    const maxHeals = skinId === 'gata_azul_manchas' ? 15 : 10;
+
     return {
       x: 120,
       y: this.height / 2,
@@ -79,13 +153,14 @@ export class GameEngine {
       vy: 0,
       width: 58,
       height: 58,
-      hp: 100,
-      maxHp: 100,
+      hp: skinConfig.maxHp,
+      maxHp: skinConfig.maxHp,
       shieldActive: false,
       shieldTimer: 0,
       shieldMaxDuration: 2.8,
       shieldCooldown: 0,
       shieldMaxCooldown: 7.5,
+      shieldColor: skinConfig.shieldColor,
       leftHand: { x: -32, y: 14, punchProgress: 0 },
       rightHand: { x: 32, y: 14, punchProgress: 0 },
       punchCooldown: 0,
@@ -96,14 +171,36 @@ export class GameEngine {
       lightningMaxCooldown: 3.4,
       powerBurstCooldown: 0,
       powerBurstMaxCooldown: 2.6,
-      healsRemaining: 10,
-      maxHeals: 10,
+      healsRemaining: maxHeals,
+      maxHeals: maxHeals,
       healCooldown: 0,
       isInvulnerable: false,
       invulnerableTimer: 0,
       facing: 1,
       eyeState: 'normal',
       animationTime: 0,
+
+      skin: skinId,
+
+      special1Cooldown: 0,
+      special1MaxCooldown: 6.0,
+      special2Cooldown: 0,
+      special2MaxCooldown: 4.0,
+
+      greenBeamCharging: false,
+      greenBeamChargeTimer: 0,
+      greenBeamChargeMax: 4.0,
+      greenBeamFiring: false,
+      greenBeamFiringTimer: 0,
+
+      mindControlActive: false,
+      mindControlTimer: 0,
+
+      timeStopActive: false,
+      timeStopTimer: 0,
+      timeStopMaxDuration: 4.5,
+
+      healRegenAccumulator: 0,
     };
   }
 
@@ -112,6 +209,7 @@ export class GameEngine {
     this.stageProgress = 0;
     this.obstacles = [];
     this.projectiles = [];
+    this.drones = [];
     this.blackFlashStrikes = [];
 
     if (stage === 'city') {
@@ -130,6 +228,7 @@ export class GameEngine {
     soundManager.stopGammaSound();
     this.player = this.createInitialPlayer();
     this.cinematic = null;
+    this.drones = [];
     this.stats = {
       score: 0,
       buildingsDestroyed: 0,
@@ -151,6 +250,7 @@ export class GameEngine {
     this.stageProgress = 0;
     this.obstacles = [];
     this.projectiles = [];
+    this.drones = [];
     this.particles = [];
     this.blackFlashStrikes = [];
     this.damageNumbers = [];
@@ -194,6 +294,10 @@ export class GameEngine {
       this.performPowerBurst();
     } else if (code === 'ShiftLeft' || code === 'ShiftRight' || code === 'KeyC') {
       this.activateShield();
+    } else if (code === 'Digit4' || code === 'KeyG') {
+      this.performSpecial1();
+    } else if (code === 'Digit5' || code === 'KeyT' || code === 'KeyV') {
+      this.performSpecial2();
     }
   }
 
@@ -239,6 +343,13 @@ export class GameEngine {
       if (Math.abs(punchX - (obs.x + obs.width / 2)) < punchRange + obs.width / 2 &&
           Math.abs(punchY - (obs.y + obs.height / 2)) < punchRange + obs.height / 2) {
         this.applyDamageToObstacle(obs, 50, 'punch', punchX, punchY);
+      }
+    });
+
+    // Check hit on Drones
+    this.drones.forEach(d => {
+      if (Math.hypot(punchX - d.x, punchY - d.y) < punchRange + d.size) {
+        this.damageDrone(d, 55, punchX, punchY);
       }
     });
 
@@ -362,19 +473,21 @@ export class GameEngine {
   }
 
   /**
-   * 5. Escudo Verde (Cooldown: 7.5s, Duración: 2.8s)
+   * 5. Escudo (Cooldown: 7.5s, Duración: 2.8s) - Color depende de la skin
    */
   public activateShield(): boolean {
     if (this.player.shieldCooldown > 0 || this.player.shieldActive || this.stage === 'start' || this.stage === 'gameover' || this.stage === 'cinematic_earth_destruction') {
       return false;
     }
 
+    const skinConfig = CHARACTER_SKINS[this.player.skin] || CHARACTER_SKINS.catvalen;
     this.player.shieldActive = true;
     this.player.shieldTimer = this.player.shieldMaxDuration;
     this.player.shieldCooldown = this.player.shieldMaxCooldown;
+    this.player.shieldColor = skinConfig.shieldColor;
     soundManager.playShield();
 
-    // Spawn green shield activation particles
+    // Spawn shield activation particles with character's shield color
     for (let i = 0; i < 16; i++) {
       const ang = (i * Math.PI * 2) / 16;
       this.particles.push({
@@ -383,7 +496,7 @@ export class GameEngine {
         vx: Math.cos(ang) * 2.5,
         vy: Math.sin(ang) * 2.5,
         size: 4,
-        color: '#10b981',
+        color: skinConfig.shieldColor,
         life: 0.5,
         maxLife: 0.5,
         alpha: 1,
@@ -395,8 +508,9 @@ export class GameEngine {
   }
 
   /**
-   * 6. Curación de Catvalen (Presionando F, límite 10 curaciones)
-   * Recupera salud, emite partículas esmeralda y destellos mágicos
+   * 6. Curación (Presionando F)
+   * Para Gata Azul: restaura +50 HP (hasta 15 usos) y disuelve proyectiles enemigos cercanos.
+   * Para otros: restaura +35 HP (hasta 10 usos).
    */
   public performHeal(): boolean {
     const p = this.player;
@@ -413,7 +527,7 @@ export class GameEngine {
     if (p.healsRemaining <= 0) {
       this.damageNumbers.push({
         id: Math.random().toString(),
-        text: '¡SIN CURAS (0/10)!',
+        text: `¡SIN CURAS (0/${p.maxHeals})!`,
         x: p.x,
         y: p.y - 35,
         vy: -1.2,
@@ -448,19 +562,28 @@ export class GameEngine {
 
     // Deduct one heal
     p.healsRemaining--;
-    p.healCooldown = 0.9; // 0.9s cooldown between heals
+    p.healCooldown = 0.85;
 
-    const healAmount = 35;
+    const healAmount = p.skin === 'gata_azul_manchas' ? 50 : 35;
     const oldHp = p.hp;
     p.hp = Math.min(p.maxHp, p.hp + healAmount);
     const actualHealed = Math.round(p.hp - oldHp);
 
     soundManager.playHeal();
 
+    // If Gata Azul, also clear nearby enemy projectiles!
+    if (p.skin === 'gata_azul_manchas') {
+      this.projectiles = this.projectiles.filter(proj => {
+        if (!proj.type.startsWith('boss_')) return true;
+        const dist = Math.hypot(proj.x - p.x, proj.y - p.y);
+        return dist > 170;
+      });
+    }
+
     // Floating green healing number
     this.damageNumbers.push({
       id: Math.random().toString(),
-      text: `+${actualHealed} HP (${p.healsRemaining}/10)`,
+      text: `+${actualHealed} HP (${p.healsRemaining}/${p.maxHeals})`,
       x: p.x,
       y: p.y - 35,
       vy: -1.8,
@@ -490,6 +613,315 @@ export class GameEngine {
     }
 
     return true;
+  }
+
+  // --- Habilidades Especiales Específicas de cada Skin ---
+
+  /**
+   * Habilidad Especial 1 (Tecla [4] / [G] o botón HUD)
+   */
+  public performSpecial1(): boolean {
+    const p = this.player;
+    if (
+      p.special1Cooldown > 0 ||
+      this.stage === 'start' ||
+      this.stage === 'gameover' ||
+      this.stage === 'victory' ||
+      this.stage === 'cinematic_earth_destruction'
+    ) {
+      return false;
+    }
+
+    switch (p.skin) {
+      case 'gata_gris': {
+        // Rayo verde que tarda 4 segundos en cargarse y no te puedes mover durante la carga
+        if (p.greenBeamCharging || p.greenBeamFiring) return false;
+        p.greenBeamCharging = true;
+        p.greenBeamChargeTimer = 0;
+        p.greenBeamChargeMax = 4.0;
+        p.special1Cooldown = 9.0;
+        p.special1MaxCooldown = 9.0;
+        soundManager.playGreenBeamCharge();
+        this.damageNumbers.push({
+          id: Math.random().toString(),
+          text: '⚡ CARGANDO RAYO VERDE (4s)...',
+          x: p.x,
+          y: p.y - 35,
+          vy: -1.2,
+          color: '#22c55e',
+          isBlackFlash: false,
+          life: 1.8,
+          maxLife: 1.8,
+          scale: 1.25,
+        });
+        return true;
+      }
+
+      case 'gato_negro_blanco': {
+        // Manipulación / Control mental: Nanovalen se pega solo
+        p.special1Cooldown = 8.0;
+        p.special1MaxCooldown = 8.0;
+        soundManager.playMindControl();
+        if (this.boss && this.stage === 'boss') {
+          this.boss.mindControlTimer = 2.5;
+          this.boss.mindControlSelfPunchCount = 0;
+          this.boss.currentAttack = 'idle';
+          this.damageNumbers.push({
+            id: Math.random().toString(),
+            text: '🧠 ¡CONTROL MENTAL: AUTO-GOLPES!',
+            x: this.boss.x,
+            y: this.boss.y - 35,
+            vy: -1.6,
+            color: '#d946ef',
+            isBlackFlash: false,
+            life: 1.5,
+            maxLife: 1.5,
+            scale: 1.35,
+          });
+        } else {
+          // In city/space: telekinetic shockwave destroys closest 3 obstacles
+          let crushed = 0;
+          this.obstacles.forEach(obs => {
+            if (crushed < 3 && obs.x > p.x) {
+              this.applyDamageToObstacle(obs, 220, 'mind_control', obs.x + 20, obs.y + 20);
+              crushed++;
+            }
+          });
+        }
+        return true;
+      }
+
+      case 'gato_blanco_manchas': {
+        // Láser lumínico amarillo de impacto instantáneo
+        p.special1Cooldown = 4.0;
+        p.special1MaxCooldown = 4.0;
+        soundManager.playLightLaser();
+        this.screenShake = 12;
+
+        this.projectiles.push({
+          id: Math.random().toString(),
+          type: 'player_light_laser',
+          x: p.x + 40,
+          y: p.y,
+          vx: 36,
+          vy: 0,
+          radius: 16,
+          damage: 220,
+          duration: 0,
+          maxDuration: 0.85,
+          color: '#facc15',
+          glowColor: '#eab308',
+          trail: [],
+        });
+
+        // Instant pierce damage to all obstacles in line
+        this.obstacles.forEach(obs => {
+          if (Math.abs(p.y - (obs.y + obs.height / 2)) < obs.height / 2 + 25 && obs.x > p.x) {
+            this.applyDamageToObstacle(obs, 220, 'light_laser', obs.x + 20, p.y);
+          }
+        });
+
+        // Instant pierce damage to all drones in line
+        this.drones.forEach(d => {
+          if (Math.abs(p.y - d.y) < d.size + 25 && d.x > p.x) {
+            this.damageDrone(d, 220, d.x, p.y);
+          }
+        });
+
+        if (this.boss && this.stage === 'boss' && Math.abs(p.y - this.boss.y) < 70 && this.boss.x > p.x) {
+          this.applyDamageToBoss(240, 'light_laser', this.boss.x, p.y, false);
+        }
+        return true;
+      }
+
+      case 'gata_azul_manchas': {
+        // Bolas de poder mágico verde/celeste (teledirigidas)
+        p.special1Cooldown = 3.5;
+        p.special1MaxCooldown = 3.5;
+        soundManager.playMagicOrb();
+
+        [-18, 0, 18].forEach((angleDeg, i) => {
+          const rad = (angleDeg * Math.PI) / 180;
+          this.projectiles.push({
+            id: Math.random().toString(),
+            type: 'player_magic_orb',
+            x: p.x + 35,
+            y: p.y + (i - 1) * 10,
+            vx: Math.cos(rad) * 14,
+            vy: Math.sin(rad) * 14,
+            radius: 12,
+            damage: 85,
+            duration: 0,
+            maxDuration: 3.2,
+            color: '#10b981',
+            glowColor: '#38bdf8',
+            trail: [],
+          });
+        });
+        return true;
+      }
+
+      case 'perro_rubio': {
+        // Creación de objetos de la nada: Yunque masivo de energía cósmica
+        p.special1Cooldown = 5.5;
+        p.special1MaxCooldown = 5.5;
+        soundManager.playEnergyAnvil();
+
+        const targetX = this.boss && this.stage === 'boss' ? this.boss.x : p.x + 220;
+        this.projectiles.push({
+          id: Math.random().toString(),
+          type: 'player_energy_anvil',
+          x: targetX,
+          y: -80,
+          vx: 0,
+          vy: 16,
+          radius: 32,
+          damage: 320,
+          duration: 0,
+          maxDuration: 2.5,
+          color: '#facc15',
+          glowColor: '#ca8a04',
+          trail: [],
+        });
+        return true;
+      }
+
+      case 'perro_marron': {
+        // Detener el tiempo: se pausa todo menos el jugador y puede atacar a Nanovalen
+        p.special1Cooldown = 12.0;
+        p.special1MaxCooldown = 12.0;
+        p.timeStopActive = true;
+        p.timeStopTimer = 4.5;
+        p.timeStopMaxDuration = 4.5;
+        soundManager.playTimeStop();
+        this.screenShake = 16;
+        this.damageNumbers.push({
+          id: Math.random().toString(),
+          text: '⏳ ¡TIEMPO DETENIDO (4.5s)!',
+          x: p.x,
+          y: p.y - 35,
+          vy: -1.6,
+          color: '#f59e0b',
+          isBlackFlash: false,
+          life: 1.8,
+          maxLife: 1.8,
+          scale: 1.4,
+        });
+        return true;
+      }
+
+      default:
+        return this.performPowerBurst();
+    }
+  }
+
+  /**
+   * Habilidad Especial 2 (Tecla [5] / [T] / [V] o botón HUD)
+   */
+  public performSpecial2(): boolean {
+    const p = this.player;
+    if (
+      p.special2Cooldown > 0 ||
+      this.stage === 'start' ||
+      this.stage === 'gameover' ||
+      this.stage === 'victory' ||
+      this.stage === 'cinematic_earth_destruction'
+    ) {
+      return false;
+    }
+
+    switch (p.skin) {
+      case 'gato_negro_blanco': {
+        // Desactivar escudo de Nanovalen
+        p.special2Cooldown = 7.0;
+        p.special2MaxCooldown = 7.0;
+        soundManager.playShieldBreak();
+        if (this.boss) {
+          this.boss.shieldActive = false;
+          this.boss.shieldTimer = 0;
+          this.boss.shieldDisabledTimer = 5.0;
+          this.damageNumbers.push({
+            id: Math.random().toString(),
+            text: '💥 ¡ESCUDO DESACTIVADO!',
+            x: this.boss.x,
+            y: this.boss.y - 30,
+            vy: -1.5,
+            color: '#c084fc',
+            isBlackFlash: false,
+            life: 1.4,
+            maxLife: 1.4,
+            scale: 1.35,
+          });
+          this.spawnHitParticles(this.boss.x, this.boss.y, '#c084fc', 22);
+        } else {
+          // Repel obstacles
+          this.obstacles.forEach(o => {
+            o.x += 120;
+            o.hp -= 80;
+          });
+        }
+        return true;
+      }
+
+      case 'gato_blanco_manchas': {
+        // Destello fotónico (aceleración lumínica extrema)
+        p.special2Cooldown = 3.5;
+        p.special2MaxCooldown = 3.5;
+        soundManager.playLightLaser();
+        p.x = Math.min(this.width - 50, p.x + 220);
+        p.isInvulnerable = true;
+        p.invulnerableTimer = 1.2;
+        this.spawnHitParticles(p.x, p.y, '#facc15', 18);
+        return true;
+      }
+
+      case 'perro_rubio': {
+        // Crear 4 espadas de energía materializadas que buscan enemigos
+        p.special2Cooldown = 3.8;
+        p.special2MaxCooldown = 3.8;
+        soundManager.playEnergyBlades();
+        [-30, -10, 10, 30].forEach((angDeg, i) => {
+          const rad = (angDeg * Math.PI) / 180;
+          this.projectiles.push({
+            id: Math.random().toString(),
+            type: 'player_energy_blade',
+            x: p.x + 30,
+            y: p.y + (i - 1.5) * 14,
+            vx: Math.cos(rad) * 18,
+            vy: Math.sin(rad) * 18,
+            radius: 14,
+            damage: 65,
+            duration: 0,
+            maxDuration: 2.8,
+            color: '#f59e0b',
+            glowColor: '#d97706',
+            trail: [],
+          });
+        });
+        return true;
+      }
+
+      case 'perro_marron': {
+        // Teletransporte crono
+        p.special2Cooldown = 3.2;
+        p.special2MaxCooldown = 3.2;
+        soundManager.playTeleport();
+        if (this.boss && this.stage === 'boss') {
+          // Teletransporte directamente a la espalda de Nanovalen para atacarlo
+          p.x = Math.min(this.width - 45, this.boss.x + 85);
+          p.y = this.boss.y;
+        } else {
+          p.x = Math.min(this.width - 55, p.x + 230);
+        }
+        p.isInvulnerable = true;
+        p.invulnerableTimer = 0.6;
+        this.spawnHitParticles(p.x, p.y, '#f59e0b', 16);
+        return true;
+      }
+
+      default:
+        return false;
+    }
   }
 
   // --- Black Flash Critical Hit System (2% Chance) ---
@@ -638,13 +1070,50 @@ export class GameEngine {
     }
   }
 
+  public damageDrone(drone: BossDrone, amount: number, hitX: number, hitY: number) {
+    drone.hp = Math.max(0, drone.hp - amount);
+    this.damageNumbers.push({
+      id: Math.random().toString(),
+      text: `-${Math.round(amount)}`,
+      x: hitX,
+      y: hitY - 12,
+      vy: -1.3,
+      color: '#f87171',
+      isBlackFlash: false,
+      life: 0.85,
+      maxLife: 0.85,
+      scale: 1.0,
+    });
+    this.spawnHitParticles(hitX, hitY, '#f43f5e', 8);
+
+    if (drone.hp <= 0) {
+      soundManager.playExplosion();
+      this.screenShake = Math.max(this.screenShake, 12);
+      this.spawnRubble(drone.x, drone.y, '#64748b', 16);
+      this.spawnHitParticles(drone.x, drone.y, '#f59e0b', 16);
+      this.damageNumbers.push({
+        id: Math.random().toString(),
+        text: '💥 ¡DRON DESTRUIDO! (+100)',
+        x: drone.x,
+        y: drone.y - 25,
+        vy: -1.8,
+        color: '#fbbf24',
+        isBlackFlash: false,
+        life: 1.4,
+        maxLife: 1.4,
+        scale: 1.25,
+      });
+      this.stats.score += 100;
+    }
+  }
+
   // --- Boss Damage & Mechanics ---
 
   private applyDamageToBoss(baseDmg: number, attackType: AttackType, hitX: number, hitY: number, bypassShield: boolean = false) {
     if (!this.boss || this.stage !== 'boss') return;
 
     // Check if Nanovalen's shield is active:
-    // Prompt: "crear escudos de energia que absorban los disparos del gato"
+    // Prompt: "crear escudos de energia que absorban los disparos del gato" (Escudo Rojo)
     if (this.boss.shieldActive && !bypassShield) {
       soundManager.playShieldAbsorb();
       this.damageNumbers.push({
@@ -653,17 +1122,22 @@ export class GameEngine {
         x: hitX,
         y: hitY - 15,
         vy: -1.5,
-        color: '#818cf8',
+        color: '#ef4444',
         isBlackFlash: false,
         life: 0.9,
         maxLife: 0.9,
         scale: 1.1,
       });
-      this.spawnHitParticles(hitX, hitY, '#818cf8', 10);
+      this.spawnHitParticles(hitX, hitY, '#ef4444', 12);
       return;
     }
 
-    const { damage, isBlackFlash } = this.rollBlackFlash(baseDmg, hitX, hitY);
+    // Prompt: "reduce el daño del rayo verde de catvalentina y que con SOLO ese ataque no sea capaz de asestar un black flash"
+    const canBlackFlash = attackType !== 'green_beam';
+    const { damage, isBlackFlash } = canBlackFlash
+      ? this.rollBlackFlash(baseDmg, hitX, hitY)
+      : { damage: Math.round(baseDmg), isBlackFlash: false };
+
     this.boss.hp = Math.max(0, this.boss.hp - damage);
     this.stats.nanovalenDamageDealt += damage;
     this.stats.totalAttacksLanded++;
@@ -737,7 +1211,13 @@ export class GameEngine {
       eyeGlowIntensity: 1.0,
       floatOffset: 0,
       introTimer: 0,
+      leftHand: { x: -36, y: 16, punchProgress: 0 },
+      rightHand: { x: 36, y: 16, punchProgress: 0 },
+      punchCooldown: 0,
+      pullTimer: 0,
+      pullHandExtended: 0,
     };
+    this.drones = [];
   }
 
   private triggerVictory() {
@@ -745,6 +1225,24 @@ export class GameEngine {
     soundManager.stopMusic();
     soundManager.playVictory();
     this.screenShake = 22;
+
+    const prevWins = this.nanovalenWins;
+    this.nanovalenWins = prevWins + 1;
+    saveNanovalenWins(this.nanovalenWins);
+    this.stats.nanovalenWins = this.nanovalenWins;
+
+    // Check if any skin has just unlocked!
+    const newlyUnlocked: string[] = [];
+    (Object.keys(CHARACTER_SKINS) as CharacterSkinId[]).forEach(sId => {
+      const skin = CHARACTER_SKINS[sId];
+      if (skin.requiredWins > 0 && prevWins < skin.requiredWins && this.nanovalenWins >= skin.requiredWins) {
+        newlyUnlocked.push(skin.name);
+      }
+    });
+
+    if (newlyUnlocked.length > 0) {
+      this.stats.unlockedSkinNotice = newlyUnlocked.join(', ');
+    }
 
     // Victory explosion around Nanovalen
     if (this.boss) {
@@ -860,18 +1358,42 @@ export class GameEngine {
       return;
     }
 
-    // Update Player
+    // Time stop update for Perro Marrón
+    if (this.player.timeStopActive) {
+      this.player.timeStopTimer -= delta;
+      if (this.player.timeStopTimer <= 0) {
+        this.player.timeStopActive = false;
+        soundManager.playShieldBreak();
+        this.damageNumbers.push({
+          id: Math.random().toString(),
+          text: '⏳ TIEMPO REANUDADO',
+          x: this.player.x,
+          y: this.player.y - 35,
+          vy: -1.2,
+          color: '#fbbf24',
+          isBlackFlash: false,
+          life: 1.2,
+          maxLife: 1.2,
+          scale: 1.2,
+        });
+      }
+    }
+
+    // Update Player (Always updates even during Time Stop!)
     this.updatePlayer(delta);
 
-    // Update Projectiles
+    // Update Projectiles (Internal check handles time stop freeze on boss projectiles)
     this.updateProjectiles(delta);
 
-    // Update Obstacles (Buildings & Asteroids)
-    this.updateObstacles(delta);
+    // Update Obstacles (Frozen during time stop!)
+    if (!this.player.timeStopActive) {
+      this.updateObstacles(delta);
+    }
 
-    // Update Boss (Nanovalen)
-    if (this.stage === 'boss' && this.boss) {
-      this.updateBoss(delta);
+    // Update Boss & Combat Drones (Nanovalen and drones are frozen during time stop!)
+    if (this.stage === 'boss' && !this.player.timeStopActive) {
+      if (this.boss) this.updateBoss(delta);
+      this.updateDrones(delta);
     }
 
     // Update Effects
@@ -882,32 +1404,146 @@ export class GameEngine {
 
   private updatePlayer(delta: number) {
     const p = this.player;
+    const skinConfig = CHARACTER_SKINS[p.skin] || CHARACTER_SKINS.catvalen;
+    const moveSpeed = skinConfig.moveSpeed;
 
-    // Keyboard Movement
-    let dx = 0;
-    let dy = 0;
-    if (this.keys['keyw'] || this.keys['arrowup']) dy -= 1;
-    if (this.keys['keys'] || this.keys['arrowdown']) dy += 1;
-    if (this.keys['keya'] || this.keys['arrowleft']) dx -= 1;
-    if (this.keys['keyd'] || this.keys['arrowright']) dx += 1;
+    // Special Gata Gris: charging green ray locks player in place!
+    if (p.greenBeamCharging) {
+      p.vx = 0;
+      p.vy = 0;
+      p.greenBeamChargeTimer += delta;
 
-    if (dx !== 0 && dy !== 0) {
-      dx *= 0.7071;
-      dy *= 0.7071;
-    }
+      // Swirling charging particles converging toward player
+      if (Math.random() < 0.6) {
+        const ang = Math.random() * Math.PI * 2;
+        const rad = 45 + Math.random() * 35;
+        this.particles.push({
+          x: p.x + Math.cos(ang) * rad,
+          y: p.y + Math.sin(ang) * rad,
+          vx: -Math.cos(ang) * 3.5,
+          vy: -Math.sin(ang) * 3.5,
+          size: 3 + Math.random() * 3,
+          color: Math.random() > 0.5 ? '#22c55e' : '#4ade80',
+          life: 0.35,
+          maxLife: 0.35,
+          alpha: 1,
+          shape: 'spark',
+        });
+      }
 
-    const moveSpeed = 6.5;
-    if (dx !== 0 || dy !== 0) {
-      p.vx = dx * moveSpeed;
-      p.vy = dy * moveSpeed;
+      if (p.greenBeamChargeTimer >= p.greenBeamChargeMax) {
+        p.greenBeamCharging = false;
+        p.greenBeamFiring = true;
+        p.greenBeamFiringTimer = 1.8;
+        soundManager.playGreenBeamFire();
+        this.screenShake = 24;
+      }
     } else {
-      // Smooth friction deceleration
-      p.vx *= 0.88;
-      p.vy *= 0.88;
+      // Normal Keyboard Movement
+      let dx = 0;
+      let dy = 0;
+      if (this.keys['keyw'] || this.keys['arrowup']) dy -= 1;
+      if (this.keys['keys'] || this.keys['arrowdown']) dy += 1;
+      if (this.keys['keya'] || this.keys['arrowleft']) dx -= 1;
+      if (this.keys['keyd'] || this.keys['arrowright']) dx += 1;
+
+      if (dx !== 0 && dy !== 0) {
+        dx *= 0.7071;
+        dy *= 0.7071;
+      }
+
+      if (dx !== 0 || dy !== 0) {
+        p.vx = dx * moveSpeed;
+        p.vy = dy * moveSpeed;
+      } else {
+        // Smooth friction deceleration
+        p.vx *= 0.88;
+        p.vy *= 0.88;
+      }
     }
 
     p.x += p.vx;
     p.y += p.vy;
+
+    // Continuous Green Beam Firing damage
+    if (p.greenBeamFiring) {
+      p.greenBeamFiringTimer -= delta;
+      this.screenShake = Math.max(this.screenShake, 14);
+
+      const beamY = p.y;
+      const beamHalfHeight = 36;
+
+      this.obstacles.forEach(obs => {
+        if (obs.x > p.x && Math.abs(beamY - (obs.y + obs.height / 2)) < obs.height / 2 + beamHalfHeight) {
+          this.applyDamageToObstacle(obs, 140 * delta, 'green_beam', obs.x + 10, beamY);
+        }
+      });
+
+      // Prompt: "reduce el daño del rayo verde de catvalentina"
+      this.drones.forEach(d => {
+        if (d.x > p.x && Math.abs(beamY - d.y) < d.size + beamHalfHeight) {
+          this.damageDrone(d, 140 * delta, d.x, beamY);
+        }
+      });
+
+      if (this.boss && this.stage === 'boss') {
+        if (this.boss.x > p.x && Math.abs(beamY - this.boss.y) < this.boss.height / 2 + beamHalfHeight) {
+          this.applyDamageToBoss(130 * delta, 'green_beam', this.boss.x, beamY, true);
+        }
+      }
+
+      if (p.greenBeamFiringTimer <= 0) {
+        p.greenBeamFiring = false;
+      }
+    }
+
+    // Gata Azul passive regen (+2.5 HP/sec)
+    if (p.skin === 'gata_azul_manchas') {
+      p.healRegenAccumulator += delta;
+      if (p.healRegenAccumulator >= 1.0) {
+        p.healRegenAccumulator = 0;
+        if (p.hp < p.maxHp) {
+          p.hp = Math.min(p.maxHp, p.hp + 2.5);
+        }
+      }
+    }
+
+    // Boss mind control auto-punch logic & shield disabled timer
+    if (this.boss) {
+      if (this.boss.shieldDisabledTimer && this.boss.shieldDisabledTimer > 0) {
+        this.boss.shieldDisabledTimer -= delta;
+        this.boss.shieldActive = false;
+        this.boss.shieldTimer = 0;
+      }
+
+      if (this.boss.mindControlTimer && this.boss.mindControlTimer > 0) {
+        this.boss.mindControlTimer -= delta;
+        this.boss.currentAttack = 'idle';
+        if (!this.boss.mindControlSelfPunchCount) this.boss.mindControlSelfPunchCount = 0;
+
+        // Auto-hit every 0.6 seconds
+        const punchInterval = 0.6;
+        const currentPunchIndex = Math.floor((2.5 - this.boss.mindControlTimer) / punchInterval);
+        if (currentPunchIndex > this.boss.mindControlSelfPunchCount) {
+          this.boss.mindControlSelfPunchCount = currentPunchIndex;
+          soundManager.playPunch();
+          this.applyDamageToBoss(75, 'mind_control', this.boss.x, this.boss.y, true);
+          this.screenShake = 12;
+          this.damageNumbers.push({
+            id: Math.random().toString(),
+            text: '¡AUTO-GOLPE! (-75)',
+            x: this.boss.x + (Math.random() - 0.5) * 40,
+            y: this.boss.y - 20,
+            vy: -1.8,
+            color: '#f43f5e',
+            isBlackFlash: false,
+            life: 1.2,
+            maxLife: 1.2,
+            scale: 1.3,
+          });
+        }
+      }
+    }
 
     // Clamp inside arena
     const margin = 35;
@@ -917,11 +1553,27 @@ export class GameEngine {
     if (p.y > this.height - margin) p.y = this.height - margin;
 
     // Cooldowns
-    if (p.punchCooldown > 0) p.punchCooldown -= delta;
-    if (p.fireballCooldown > 0) p.fireballCooldown -= delta;
-    if (p.lightningCooldown > 0) p.lightningCooldown -= delta;
-    if (p.powerBurstCooldown > 0) p.powerBurstCooldown -= delta;
-    if (p.healCooldown > 0) p.healCooldown -= delta;
+    if (this.infiniteHeals) {
+      p.healsRemaining = p.maxHeals;
+    }
+    if (this.noCooldowns) {
+      p.punchCooldown = 0;
+      p.fireballCooldown = 0;
+      p.lightningCooldown = 0;
+      p.powerBurstCooldown = 0;
+      p.shieldCooldown = 0;
+      p.healCooldown = 0;
+      p.special1Cooldown = 0;
+      p.special2Cooldown = 0;
+    } else {
+      if (p.punchCooldown > 0) p.punchCooldown -= delta;
+      if (p.fireballCooldown > 0) p.fireballCooldown -= delta;
+      if (p.lightningCooldown > 0) p.lightningCooldown -= delta;
+      if (p.powerBurstCooldown > 0) p.powerBurstCooldown -= delta;
+      if (p.healCooldown > 0) p.healCooldown -= delta;
+      if (p.special1Cooldown > 0) p.special1Cooldown = Math.max(0, p.special1Cooldown - delta);
+      if (p.special2Cooldown > 0) p.special2Cooldown = Math.max(0, p.special2Cooldown - delta);
+    }
 
     // Hand punch progress decay
     if (p.leftHand.punchProgress > 0) {
@@ -1031,7 +1683,7 @@ export class GameEngine {
       return;
     }
 
-    if (this.player.isInvulnerable) return;
+    if (this.player.isInvulnerable || this.godMode) return;
 
     // Check Nanovalen's 1% Black Flash on boss attacks
     let finalAmount = amount;
@@ -1178,9 +1830,65 @@ export class GameEngine {
 
   private updateProjectiles(delta: number) {
     this.projectiles.forEach(p => {
+      // If time is stopped, freeze enemy projectiles in mid air!
+      if (this.player.timeStopActive && !p.type.startsWith('player_')) {
+        return;
+      }
+
       p.duration += delta;
-      p.x += p.vx * delta * 60;
-      p.y += p.vy * delta * 60;
+
+      // Homing behavior for magic orbs and energy blades
+      if (p.type === 'player_magic_orb' || p.type === 'player_energy_blade') {
+        let targetX = this.width + 100;
+        let targetY = p.y;
+        if (this.boss && this.stage === 'boss') {
+          targetX = this.boss.x;
+          targetY = this.boss.y;
+        } else if (this.obstacles.length > 0) {
+          const fwd = this.obstacles.filter(o => o.x > p.x);
+          if (fwd.length > 0) {
+            targetX = fwd[0].x + fwd[0].width / 2;
+            targetY = fwd[0].y + fwd[0].height / 2;
+          }
+        }
+        const ang = Math.atan2(targetY - p.y, targetX - p.x);
+        const curAng = Math.atan2(p.vy, p.vx);
+        const speed = Math.hypot(p.vx, p.vy) || 14;
+        const newAng = curAng + (ang - curAng) * 0.12;
+        p.vx = Math.cos(newAng) * speed;
+        p.vy = Math.sin(newAng) * speed;
+      }
+
+      // Special Anvil gravity & slam
+      if (p.type === 'player_energy_anvil') {
+        p.y += p.vy * delta * 60;
+        const groundY = this.boss && this.stage === 'boss' ? this.boss.y : this.height * 0.65;
+        if (p.y >= groundY) {
+          soundManager.playEnergyAnvil();
+          this.screenShake = 22;
+          this.spawnHitParticles(p.x, p.y, '#facc15', 24);
+          this.spawnRubble(p.x, p.y, '#ca8a04', 16);
+
+          if (this.boss && this.stage === 'boss') {
+            this.applyDamageToBoss(p.damage, 'energy_anvil', p.x, p.y, true);
+          }
+          this.obstacles.forEach(obs => {
+            if (Math.hypot(obs.x + obs.width / 2 - p.x, obs.y + obs.height / 2 - p.y) < 160) {
+              this.applyDamageToObstacle(obs, p.damage, 'energy_anvil', p.x, p.y);
+            }
+          });
+          this.drones.forEach(d => {
+            if (Math.hypot(d.x - p.x, d.y - p.y) < 160) {
+              this.damageDrone(d, p.damage, d.x, d.y);
+            }
+          });
+          p.duration = p.maxDuration;
+          return;
+        }
+      } else {
+        p.x += p.vx * delta * 60;
+        p.y += p.vy * delta * 60;
+      }
 
       // Update trail
       p.trail.unshift({ x: p.x, y: p.y, alpha: 1 });
@@ -1197,8 +1905,21 @@ export class GameEngine {
 
           if (hit) {
             this.applyDamageToObstacle(obs, p.damage, p.type.replace('player_', '') as AttackType, p.x, p.y);
-            // Expire projectile
-            p.duration = p.maxDuration;
+            if (p.type !== 'player_light_laser') {
+              p.duration = p.maxDuration;
+            }
+            break;
+          }
+        }
+
+        // Check collision with Drones
+        for (const drone of this.drones) {
+          const dDist = Math.hypot(p.x - drone.x, p.y - drone.y);
+          if (dDist < drone.size + p.radius) {
+            this.damageDrone(drone, p.damage, p.x, p.y);
+            if (p.type !== 'player_light_laser') {
+              p.duration = p.maxDuration;
+            }
             break;
           }
         }
@@ -1206,16 +1927,18 @@ export class GameEngine {
         // Check collision with Nanovalen
         if (this.boss && this.stage === 'boss') {
           const bDist = Math.hypot(p.x - this.boss.x, p.y - this.boss.y);
-          if (bDist < (this.boss.width / 2 + p.radius)) {
+          if (bDist < this.boss.width / 2 + p.radius) {
             this.applyDamageToBoss(p.damage, p.type.replace('player_', '') as AttackType, p.x, p.y);
-            p.duration = p.maxDuration;
+            if (p.type !== 'player_light_laser') {
+              p.duration = p.maxDuration;
+            }
           }
         }
-      } else if (p.type === 'boss_meteor') {
-        // Nanovalen meteor hits player
+      } else if (p.type === 'boss_meteor' || p.type === 'boss_drone_laser' || p.type === 'boss_pulse_laser') {
+        // Nanovalen meteor or drone laser hits player
         const pDist = Math.hypot(p.x - this.player.x, p.y - this.player.y);
         if (pDist < this.player.width * 0.4 + p.radius) {
-          this.takePlayerDamage(p.damage, 'meteor');
+          this.takePlayerDamage(p.damage, p.type === 'boss_meteor' ? 'meteor' : 'laser');
           p.duration = p.maxDuration;
         }
       }
@@ -1254,6 +1977,64 @@ export class GameEngine {
       }
     }
 
+    // Hand punch progress & punch cooldown decay
+    if (b.punchCooldown > 0) b.punchCooldown -= delta;
+    if (b.leftHand.punchProgress > 0) {
+      b.leftHand.punchProgress = Math.max(0, b.leftHand.punchProgress - delta * 3.5);
+    }
+    if (b.rightHand.punchProgress > 0) {
+      b.rightHand.punchProgress = Math.max(0, b.rightHand.punchProgress - delta * 3.5);
+    }
+
+    // Prompt: "nanovalen debe ser capaz de golpear (al igual q el jugador) pero mas lento y con un cierto rango de acercamiento necesario"
+    const distToPlayer = Math.hypot(this.player.x - b.x, this.player.y - b.y);
+    const inMeleeRange = distToPlayer < 140;
+    const canMeleePunch =
+      b.punchCooldown <= 0 &&
+      inMeleeRange &&
+      b.currentAttack !== 'gamma_ray_charge' &&
+      b.currentAttack !== 'gamma_ray_burst' &&
+      b.currentAttack !== 'gravity_pull';
+
+    if (canMeleePunch) {
+      b.punchCooldown = 1.8; // Slower than player's 0.75s
+      const punchHand = Math.random() > 0.5 ? b.leftHand : b.rightHand;
+      punchHand.punchProgress = 1.0;
+      soundManager.playPunch();
+
+      if (this.player.shieldActive) {
+        soundManager.playShieldAbsorb();
+        this.damageNumbers.push({
+          id: Math.random().toString(),
+          text: '¡GOLPE BLOQUEADO!',
+          x: this.player.x,
+          y: this.player.y - 25,
+          vy: -1.4,
+          color: '#34d399',
+          isBlackFlash: false,
+          life: 0.9,
+          maxLife: 0.9,
+          scale: 1.15,
+        });
+        this.spawnHitParticles(this.player.x, this.player.y, '#34d399', 10);
+      } else {
+        const crit = this.rollBossBlackFlash(28, this.player.x, this.player.y);
+        this.takePlayerDamage(crit.damage, 'collision');
+        this.damageNumbers.push({
+          id: Math.random().toString(),
+          text: crit.isBlackFlash ? '★ NANOVALEN PUÑO BLACK FLASH! ★' : '-28 (PUÑO)',
+          x: this.player.x,
+          y: this.player.y - 22,
+          vy: -1.4,
+          color: '#ef4444',
+          isBlackFlash: crit.isBlackFlash,
+          life: 0.95,
+          maxLife: 0.95,
+          scale: 1.2,
+        });
+      }
+    }
+
     // Check trigger for Final Attack (Gamma Ray Burst):
     // Triggers when boss HP drops below 35% and hasn't triggered recently
     const hpRatio = b.hp / b.maxHp;
@@ -1280,10 +2061,15 @@ export class GameEngine {
     // Normal attack pool:
     // 1) meteor_storm
     // 2) laser_warning (1.5s telegraph)
-    // 3) energy_shield (absorbs shots)
-    const options: BossAttack[] = ['meteor_storm', 'laser_warning', 'energy_shield'];
-    const chosen = options[Math.floor(Math.random() * options.length)];
+    // 3) energy_shield (absorbs shots - Escudo Rojo)
+    // 4) gravity_pull (pulls player -> shield or guaranteed black flash)
+    // 5) drone_spawn (3 combat drones with 300 HP)
+    const options: BossAttack[] = ['meteor_storm', 'laser_warning', 'energy_shield', 'gravity_pull'];
+    if (this.drones.length === 0) {
+      options.push('drone_spawn');
+    }
 
+    const chosen = options[Math.floor(Math.random() * options.length)];
     b.currentAttack = chosen;
     b.attackTimer = 0;
 
@@ -1293,7 +2079,7 @@ export class GameEngine {
       b.laserHeight = 48;
       soundManager.playLaserWarning();
     } else if (chosen === 'energy_shield') {
-      // Prompt: "crear escudos de energia que absorban los disparos del gato"
+      // Prompt: "el escudo de nanovalen debe ser rojo"
       b.shieldActive = true;
       b.shieldTimer = 4.5;
       soundManager.playShield();
@@ -1301,6 +2087,89 @@ export class GameEngine {
       b.currentAttack = 'idle';
     } else if (chosen === 'meteor_storm') {
       soundManager.playExplosion();
+    } else if (chosen === 'gravity_pull') {
+      // Prompt: "otro ataque donde nanovalen extienda la mano (circulo) y atraiga el jugador hacia el y si el jugador no activa su escudo, el ataque resultara en que nanovalen le acierte un black flash garantizado al jugador"
+      soundManager.playLaserWarning();
+      soundManager.playGravityPull();
+      b.pullTimer = 2.4;
+      b.pullHandExtended = 0;
+      this.damageNumbers.push({
+        id: Math.random().toString(),
+        text: '⚠️ ¡ATRACCIÓN GRAVITATORIA! ¡ACTIVA TU ESCUDO (SHIFT)!',
+        x: this.width * 0.45,
+        y: 65,
+        vy: -0.8,
+        color: '#f43f5e',
+        isBlackFlash: false,
+        life: 2.2,
+        maxLife: 2.2,
+        scale: 1.3,
+      });
+    } else if (chosen === 'drone_spawn') {
+      // Prompt: "lanza 3 drones alrededor del mapa y que vayan disparando laseres en distintos patrones. los drones seguiran disparandole al jugador durante el resto del combate (hasta que sean destruidos por el jugador o nanovalen active el estallido de rayos gamma, los drones tendran 300 HP)"
+      soundManager.playLaserWarning();
+      this.damageNumbers.push({
+        id: Math.random().toString(),
+        text: '⚠️ ¡3 DRONES DE ASALTO ACTIVADOS (300 HP)!',
+        x: b.x - 30,
+        y: b.y - 40,
+        vy: -1.2,
+        color: '#f43f5e',
+        isBlackFlash: false,
+        life: 2.2,
+        maxLife: 2.2,
+        scale: 1.25,
+      });
+
+      this.drones = [
+        {
+          id: 'drone_1_' + Math.random().toString(),
+          x: this.width * 0.42,
+          y: 110,
+          hp: 300,
+          maxHp: 300,
+          vx: 0.9,
+          vy: 0.4,
+          targetY: 110,
+          pattern: 'sweep',
+          shootTimer: 0.4,
+          shootCooldown: 2.0,
+          angle: 0,
+          size: 24,
+        },
+        {
+          id: 'drone_2_' + Math.random().toString(),
+          x: this.width * 0.25,
+          y: this.height * 0.52,
+          hp: 300,
+          maxHp: 300,
+          vx: 0.6,
+          vy: -0.6,
+          targetY: this.height * 0.52,
+          pattern: 'pulse',
+          shootTimer: 0.8,
+          shootCooldown: 2.4,
+          angle: 0,
+          size: 24,
+        },
+        {
+          id: 'drone_3_' + Math.random().toString(),
+          x: this.width * 0.55,
+          y: this.height - 110,
+          hp: 300,
+          maxHp: 300,
+          vx: -0.8,
+          vy: 0.5,
+          targetY: this.height - 110,
+          pattern: 'tracker',
+          shootTimer: 1.2,
+          shootCooldown: 2.2,
+          angle: 0,
+          size: 24,
+        },
+      ];
+      b.attackCooldown = 2.0;
+      b.currentAttack = 'idle';
     }
   }
 
@@ -1310,7 +2179,6 @@ export class GameEngine {
 
     // 1. Meteor Storm (Enhanced speed & damage: 38 base)
     if (b.currentAttack === 'meteor_storm') {
-      // Launch barrage of fast tracking meteorites
       if (b.attackTimer > 0.25 && b.attackTimer < 1.7 && Math.random() < 0.32) {
         const targetAng = Math.atan2(this.player.y - b.y, this.player.x - b.x);
         const speed = 9.5;
@@ -1339,17 +2207,14 @@ export class GameEngine {
 
     // 2. Laser with 1.5s telegraph warning! (Enhanced damage: 75 base!)
     else if (b.currentAttack === 'laser_warning') {
-      // Tracking player's Y slightly during the first 0.6s of warning
       if (b.attackTimer < 0.6) {
         b.laserY += (this.player.y - b.laserY) * 0.09;
       }
 
-      // Warning beeps
       if (Math.floor(b.attackTimer * 3) !== Math.floor((b.attackTimer - delta) * 3)) {
         soundManager.playLaserWarning();
       }
 
-      // Exactly 1.5s warning elapsed!
       if (b.attackTimer >= 1.5) {
         b.currentAttack = 'laser_fire';
         b.attackTimer = 0;
@@ -1357,9 +2222,7 @@ export class GameEngine {
         this.screenShake = 18;
       }
     } else if (b.currentAttack === 'laser_fire') {
-      // Fire duration 0.65s
       const halfLaserH = b.laserHeight / 2;
-      // Check player collision in laser corridor
       if (this.player.x < b.x && Math.abs(this.player.y - b.laserY) < halfLaserH + 20) {
         this.takePlayerDamage(75, 'laser');
       }
@@ -1370,10 +2233,84 @@ export class GameEngine {
       }
     }
 
-    // 3. Final Attack: Gamma Ray Burst (Uncancelable! Triple Power: 66 damage per tick!)
+    // 3. Gravity Pull & Guaranteed Black Flash
+    // "otro ataque donde nanovalen extienda la mano (circulo) y atraiga el jugador hacia el y si el jugador no activa su escudo, el ataque resultara en que nanovalen le acierte un black flash garantizado al jugador"
+    else if (b.currentAttack === 'gravity_pull') {
+      b.pullHandExtended = Math.min(1.0, b.attackTimer / 0.4);
+      b.rightHand.x = -65;
+      b.rightHand.punchProgress = 1.0;
+
+      const handX = b.x - 70;
+      const handY = b.y + 16;
+
+      const pDx = handX - this.player.x;
+      const pDy = handY - this.player.y;
+      const pDist = Math.hypot(pDx, pDy);
+
+      // Periodically trigger gravity vortex hum
+      if (Math.floor(b.attackTimer * 3) !== Math.floor((b.attackTimer - delta) * 3)) {
+        soundManager.playGravityPull();
+      }
+
+      // Vacuum suction pull effect towards Nanovalen's hand
+      if (b.attackTimer < 1.7) {
+        if (pDist > 45) {
+          const pullSpeed = 8.0;
+          this.player.x += (pDx / pDist) * pullSpeed;
+          this.player.y += (pDy / pDist) * pullSpeed;
+        }
+
+        // Swirling gravitational vortex particles
+        if (Math.random() < 0.6) {
+          const pAngle = Math.random() * Math.PI * 2;
+          const pRad = 35 + Math.random() * 55;
+          this.particles.push({
+            x: handX + Math.cos(pAngle) * pRad,
+            y: handY + Math.sin(pAngle) * pRad,
+            vx: -Math.cos(pAngle) * 4.5,
+            vy: -Math.sin(pAngle) * 4.5,
+            size: 3 + Math.random() * 3,
+            color: Math.random() > 0.5 ? '#f43f5e' : '#a855f7',
+            life: 0.3,
+            maxLife: 0.3,
+            alpha: 1,
+            shape: 'spark',
+          });
+        }
+      } else {
+        // Climax: check if player raised shield!
+        if (this.player.shieldActive) {
+          soundManager.playShieldAbsorb();
+          this.screenShake = 16;
+          this.damageNumbers.push({
+            id: Math.random().toString(),
+            text: '🛡️ ¡BLACK FLASH ANULADO CON ESCUDO!',
+            x: this.player.x,
+            y: this.player.y - 30,
+            vy: -1.6,
+            color: '#34d399',
+            isBlackFlash: false,
+            life: 1.8,
+            maxLife: 1.8,
+            scale: 1.35,
+          });
+          this.spawnHitParticles(this.player.x, this.player.y, '#34d399', 18);
+        } else {
+          // NO SHIELD -> GUARANTEED BLACK FLASH!
+          this.triggerGuaranteedBossBlackFlash(handX, handY);
+        }
+
+        b.pullHandExtended = 0;
+        b.rightHand.x = 36;
+        b.rightHand.punchProgress = 0;
+        b.currentAttack = 'idle';
+        b.attackCooldown = 2.0;
+      }
+    }
+
+    // 4. Final Attack: Gamma Ray Burst (Uncancelable! Triple Power: 66 damage per tick!)
     else if (b.currentAttack === 'gamma_ray_charge') {
       b.gammaChargeProgress = Math.min(1, b.attackTimer / 2.0);
-      // Smoothly move Nanovalen to arena center
       b.x += (this.width * 0.7 - b.x) * 0.06;
       b.y += (this.height * 0.5 - b.y) * 0.06;
 
@@ -1384,17 +2321,14 @@ export class GameEngine {
         this.screenShake = 28;
       }
     } else if (b.currentAttack === 'gamma_ray_burst') {
-      // Gamma ray burst lasts 3.8 seconds with rotating lethal arcs and safe dodge gaps!
       const burstDuration = 3.8;
       const rotSpeed = 0.9;
 
-      // Update rays
       b.gammaRays.forEach(ray => {
         ray.angle += rotSpeed * delta;
         ray.safeAngleStart = ray.angle + ray.width;
         ray.safeAngleEnd = ray.angle + Math.PI;
 
-        // Check player angle relative to boss center
         const pAngle = Math.atan2(this.player.y - b.y, this.player.x - b.x);
         let normalizedPAngle = pAngle;
         if (normalizedPAngle < 0) normalizedPAngle += Math.PI * 2;
@@ -1404,7 +2338,6 @@ export class GameEngine {
         let normalizedRayEnd = (ray.angle + ray.width) % (Math.PI * 2);
         if (normalizedRayEnd < 0) normalizedRayEnd += Math.PI * 2;
 
-        // If inside lethal sector and not inside safe pocket
         let inLethal = false;
         if (normalizedRayStart < normalizedRayEnd) {
           inLethal = normalizedPAngle >= normalizedRayStart && normalizedPAngle <= normalizedRayEnd;
@@ -1413,7 +2346,6 @@ export class GameEngine {
         }
 
         if (inLethal) {
-          // Triple-strength gamma damage: 66 per tick
           this.takePlayerDamage(66, 'gamma');
         }
       });
@@ -1421,7 +2353,7 @@ export class GameEngine {
       if (b.attackTimer >= burstDuration) {
         b.currentAttack = 'idle';
         b.attackCooldown = 2.5;
-        b.gammaBurstTimer = 16.0; // Cooldown for next gamma ray burst
+        b.gammaBurstTimer = 16.0;
       }
     }
 
@@ -1430,12 +2362,192 @@ export class GameEngine {
     }
   }
 
+  private triggerGuaranteedBossBlackFlash(hitX: number, hitY: number) {
+    const critDamage = 135;
+    this.stats.bossBlackFlashesCount++;
+    soundManager.playBossBlackFlash();
+    this.screenShake = 34;
+
+    const branches: { x1: number; y1: number; x2: number; y2: number }[] = [];
+    const branchCount = 14;
+    for (let i = 0; i < branchCount; i++) {
+      let curX = 0;
+      let curY = 0;
+      const mainAngle = (i * Math.PI * 2) / branchCount + (Math.random() - 0.5) * 0.4;
+      const segments = 6;
+      const segLen = 22 + Math.random() * 14;
+
+      for (let s = 0; s < segments; s++) {
+        const nextAngle = mainAngle + (Math.random() - 0.5) * 0.85;
+        const nextX = curX + Math.cos(nextAngle) * segLen;
+        const nextY = curY + Math.sin(nextAngle) * segLen;
+        branches.push({ x1: curX, y1: curY, x2: nextX, y2: nextY });
+        curX = nextX;
+        curY = nextY;
+      }
+    }
+
+    this.blackFlashStrikes.push({
+      id: Math.random().toString(),
+      x: this.player.x,
+      y: this.player.y,
+      timer: 1.1,
+      maxTimer: 1.1,
+      lightningBranches: branches,
+      damage: critDamage,
+      isBoss: true,
+    });
+
+    this.damageNumbers.push({
+      id: Math.random().toString(),
+      text: `💥 ★ NANOVALEN BLACK FLASH GARANTIZADO! -${critDamage} ★`,
+      x: this.player.x,
+      y: this.player.y - 45,
+      vy: -2.2,
+      color: '#ff003b',
+      isBlackFlash: true,
+      life: 2.4,
+      maxLife: 2.4,
+      scale: 1.5,
+    });
+
+    if (!this.godMode) {
+      this.player.hp = Math.max(0, this.player.hp - critDamage);
+      this.player.isInvulnerable = true;
+      this.player.invulnerableTimer = 1.0;
+      this.player.eyeState = 'hurt';
+
+      if (this.player.hp <= 0) {
+        this.triggerGameOver();
+      }
+    }
+  }
+
+  private updateDrones(delta: number) {
+    if (this.stage !== 'boss' || this.drones.length === 0) return;
+
+    this.drones.forEach(drone => {
+      // Hover & patrol movement
+      drone.x += drone.vx * delta * 60;
+      drone.y += drone.vy * delta * 60;
+
+      // Keep within arena bounds
+      if (drone.x < 80) {
+        drone.x = 80;
+        drone.vx = Math.abs(drone.vx);
+      } else if (drone.x > this.width - 220) {
+        drone.x = this.width - 220;
+        drone.vx = -Math.abs(drone.vx);
+      }
+
+      if (drone.y < 80) {
+        drone.y = 80;
+        drone.vy = Math.abs(drone.vy);
+      } else if (drone.y > this.height - 80) {
+        drone.y = this.height - 80;
+        drone.vy = -Math.abs(drone.vy);
+      }
+
+      // Drone shooting pattern
+      drone.shootTimer += delta;
+      if (drone.shootTimer >= drone.shootCooldown) {
+        drone.shootTimer = 0;
+        soundManager.playDroneLaser();
+
+        const angleToPlayer = Math.atan2(this.player.y - drone.y, this.player.x - drone.x);
+
+        if (drone.pattern === 'sweep') {
+          // Sweep laser fires 2 angled bolts
+          [-0.15, 0.15].forEach(offset => {
+            const ang = angleToPlayer + offset;
+            const speed = 7.5;
+            this.projectiles.push({
+              id: Math.random().toString(),
+              type: 'boss_drone_laser',
+              x: drone.x,
+              y: drone.y,
+              vx: Math.cos(ang) * speed,
+              vy: Math.sin(ang) * speed,
+              radius: 9,
+              damage: 18,
+              duration: 0,
+              maxDuration: 3.5,
+              color: '#f43f5e',
+              glowColor: '#ef4444',
+              trail: [],
+            });
+          });
+        } else if (drone.pattern === 'pulse') {
+          // Rapid pulse plasma beads
+          const speed = 8.5;
+          this.projectiles.push({
+            id: Math.random().toString(),
+            type: 'boss_pulse_laser',
+            x: drone.x,
+            y: drone.y,
+            vx: Math.cos(angleToPlayer) * speed,
+            vy: Math.sin(angleToPlayer) * speed,
+            radius: 8,
+            damage: 20,
+            duration: 0,
+            maxDuration: 3.5,
+            color: '#fb7185',
+            glowColor: '#e11d48',
+            trail: [],
+          });
+        } else if (drone.pattern === 'tracker') {
+          // High speed precision tracking laser
+          const speed = 9.8;
+          this.projectiles.push({
+            id: Math.random().toString(),
+            type: 'boss_drone_laser',
+            x: drone.x,
+            y: drone.y,
+            vx: Math.cos(angleToPlayer) * speed,
+            vy: Math.sin(angleToPlayer) * speed,
+            radius: 10,
+            damage: 24,
+            duration: 0,
+            maxDuration: 3.0,
+            color: '#ff2e4b',
+            glowColor: '#dc2626',
+            trail: [],
+          });
+        }
+      }
+    });
+
+    // Filter destroyed drones
+    this.drones = this.drones.filter(d => d.hp > 0);
+  }
+
   private startGammaRayBurst() {
     const b = this.boss!;
     b.currentAttack = 'gamma_ray_charge';
     b.attackTimer = 0;
     b.gammaChargeProgress = 0;
     soundManager.playGammaCharge();
+
+    // Prompt: "hasta que sean destruidos por el jugador o nanovalen active el estallido de rayos gamma, los drones tendran 300 HP"
+    if (this.drones.length > 0) {
+      this.drones.forEach(d => {
+        this.spawnHitParticles(d.x, d.y, '#f43f5e', 14);
+        this.spawnRubble(d.x, d.y, '#475569', 10);
+      });
+      this.damageNumbers.push({
+        id: Math.random().toString(),
+        text: '⚡ DRONES CONSUMIDOS POR LA ENERGÍA GAMMA',
+        x: this.width / 2,
+        y: 80,
+        vy: -1.0,
+        color: '#fb7185',
+        isBlackFlash: false,
+        life: 1.6,
+        maxLife: 1.6,
+        scale: 1.2,
+      });
+      this.drones = [];
+    }
 
     // 2 lethal wedges leaving 2 safe zones for Catvalen to maneuver and dodge!
     b.gammaRays = [

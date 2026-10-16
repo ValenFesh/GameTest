@@ -13,7 +13,15 @@ import { StartModal } from './components/StartModal';
 import { VictoryModal } from './components/VictoryModal';
 import { GameOverModal } from './components/GameOverModal';
 import { AudioSettingsModal } from './components/AudioSettingsModal';
+import { AdminPanelModal } from './components/AdminPanelModal';
 import { GameStage } from './types/game';
+import {
+  CharacterSkinId,
+  getSavedSelectedSkin,
+  getSavedNanovalenWins,
+  getAdminUnlockAll,
+  saveAdminUnlockAll,
+} from './game/skins';
 
 export default function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -23,6 +31,10 @@ export default function App() {
   const [stage, setStage] = useState<GameStage>('start');
   const [isMuted, setIsMuted] = useState<boolean>(false);
   const [isAudioModalOpen, setIsAudioModalOpen] = useState<boolean>(false);
+  const [isAdminModalOpen, setIsAdminModalOpen] = useState<boolean>(false);
+  const [selectedSkin, setSelectedSkin] = useState<CharacterSkinId>(() => getSavedSelectedSkin());
+  const [nanovalenWins, setNanovalenWinsState] = useState<number>(() => getSavedNanovalenWins());
+  const [adminUnlockAll, setAdminUnlockAllState] = useState<boolean>(() => getAdminUnlockAll());
   const [, setTick] = useState<number>(0); // force HUD re-render at smooth cadence
 
   // Initialize Game Engine & Renderer
@@ -39,6 +51,9 @@ export default function App() {
     canvas.height = height;
 
     const engine = new GameEngine(width, height);
+    engine.selectSkin(selectedSkin);
+    engine.setNanovalenWins(nanovalenWins);
+    engine.setAdminUnlockAll(adminUnlockAll);
     const renderer = new GameRenderer(ctx, width, height);
 
     engineRef.current = engine;
@@ -46,7 +61,10 @@ export default function App() {
 
     engine.setCallbacks(
       () => setStage('gameover'),
-      () => setStage('victory')
+      () => {
+        setStage('victory');
+        setNanovalenWinsState(engine.nanovalenWins);
+      }
     );
 
     const handleResize = () => {
@@ -62,6 +80,13 @@ export default function App() {
 
     // Keyboard controls
     const onKeyDown = (e: KeyboardEvent) => {
+      // Admin Panel Hotkey (F1 or Backquote `)
+      if (e.code === 'F1' || e.code === 'Backquote') {
+        e.preventDefault();
+        setIsAdminModalOpen((prev) => !prev);
+        return;
+      }
+
       if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) {
         e.preventDefault();
       }
@@ -112,12 +137,17 @@ export default function App() {
         // 2. Obstacles (Buildings or Asteroids)
         renderer.drawObstacles(engine.obstacles, engine.stage, gameTime);
 
-        // 3. Projectiles (Fireballs, lightning, power bursts, boss meteors)
+        // 3. Projectiles (Fireballs, lightning, power bursts, boss meteors, drone lasers)
         renderer.drawProjectiles(engine.projectiles, gameTime);
+
+        // 3.5 Boss Combat Drones (300 HP drones orbiting and shooting)
+        if (engine.drones && engine.drones.length > 0) {
+          renderer.drawDrones(engine.drones, gameTime);
+        }
 
         // 4. Boss Nanovalen (if boss stage or boss intro)
         if (engine.boss && (engine.stage === 'boss' || engine.stage === 'boss_intro')) {
-          renderer.drawBoss(engine.boss, gameTime);
+          renderer.drawBoss(engine.boss, gameTime, engine.player.x, engine.player.y);
         }
 
         // 5. Catvalen Player (Square cat from Image 1 with floating circular hands)
@@ -131,6 +161,11 @@ export default function App() {
 
         // 8. Damage numbers & floating text
         renderer.drawDamageNumbers(engine.damageNumbers);
+
+        // 9. Time stop chrono overlay (When Perro Marrón freezes time)
+        if (engine.player.timeStopActive) {
+          renderer.drawTimeStopOverlay(engine.player.timeStopTimer, engine.player.timeStopMaxDuration, gameTime);
+        }
       }
 
       ctx.restore();
@@ -161,23 +196,60 @@ export default function App() {
     };
   }, []);
 
+  const handleSelectSkin = useCallback((skinId: CharacterSkinId) => {
+    setSelectedSkin(skinId);
+    if (engineRef.current) {
+      engineRef.current.selectSkin(skinId);
+    }
+  }, []);
+
+  const handleSetWins = useCallback((wins: number) => {
+    setNanovalenWinsState(wins);
+    if (engineRef.current) {
+      engineRef.current.setNanovalenWins(wins);
+    }
+  }, []);
+
+  const handleToggleAdminUnlockAll = useCallback((unlocked: boolean) => {
+    setAdminUnlockAllState(unlocked);
+    saveAdminUnlockAll(unlocked);
+    if (engineRef.current) {
+      engineRef.current.setAdminUnlockAll(unlocked);
+    }
+  }, []);
+
+  const handleJumpStage = useCallback((targetStage: GameStage) => {
+    if (!engineRef.current) return;
+    if (targetStage === 'start') {
+      engineRef.current.resetToMenu();
+      setStage('start');
+    } else {
+      engineRef.current.jumpToStage(targetStage);
+      setStage(targetStage);
+    }
+  }, []);
+
   const handleStartGame = useCallback(() => {
     if (!engineRef.current) return;
+    engineRef.current.selectSkin(selectedSkin);
     engineRef.current.resetGame();
     setStage('city');
-  }, []);
+  }, [selectedSkin]);
 
   const handleRetry = useCallback(() => {
     if (!engineRef.current) return;
+    engineRef.current.selectSkin(selectedSkin);
     engineRef.current.resetGame();
     setStage('city');
-  }, []);
+  }, [selectedSkin]);
 
   const handleReturnToMenu = useCallback(() => {
     soundManager.stopMusic();
     soundManager.stopGammaSound();
     if (engineRef.current) {
       engineRef.current.resetToMenu();
+      setNanovalenWinsState(engineRef.current.nanovalenWins);
+      setSelectedSkin(engineRef.current.currentSkin);
     }
     setStage('start');
   }, []);
@@ -192,6 +264,15 @@ export default function App() {
     };
     engineRef.current.startStage('boss');
     setStage('boss');
+  }, []);
+
+  const [nextLevelNotice, setNextLevelNotice] = useState<string | null>(null);
+
+  const handleNextLevel = useCallback(() => {
+    setNextLevelNotice('🚀 ¡Siguiente Nivel preparado! Listo para que me indiques qué deseas implementar a continuación.');
+    setTimeout(() => {
+      setNextLevelNotice(null);
+    }, 4500);
   }, []);
 
   const handleToggleMute = useCallback(() => {
@@ -217,7 +298,10 @@ export default function App() {
           onPowerBurst={() => engineRef.current?.performPowerBurst()}
           onShield={() => engineRef.current?.activateShield()}
           onHeal={() => engineRef.current?.performHeal()}
+          onSpecial1={() => engineRef.current?.performSpecial1()}
+          onSpecial2={() => engineRef.current?.performSpecial2()}
           onOpenAudioModal={() => setIsAudioModalOpen(true)}
+          onOpenAdminModal={() => setIsAdminModalOpen(true)}
           isMuted={isMuted}
           onToggleMute={handleToggleMute}
         />
@@ -228,11 +312,17 @@ export default function App() {
         <TouchControls engine={engineRef.current} />
       )}
 
-      {/* Welcome / Start Screen */}
+      {/* Welcome / Start Screen with Skin Selector & Admin Button */}
       {stage === 'start' && (
         <StartModal
           onStart={handleStartGame}
+          selectedSkin={selectedSkin}
+          nanovalenWins={nanovalenWins}
+          adminUnlockAll={adminUnlockAll}
+          onSelectSkin={handleSelectSkin}
+          onSetWins={handleSetWins}
           onOpenAudioModal={() => setIsAudioModalOpen(true)}
+          onOpenAdminModal={() => setIsAdminModalOpen(true)}
         />
       )}
 
@@ -258,7 +348,15 @@ export default function App() {
           onPlayAgain={handleStartGame}
           onRematchBoss={handleRematchBoss}
           onMainMenu={handleReturnToMenu}
+          onNextLevel={handleNextLevel}
         />
+      )}
+
+      {/* Siguiente Nivel Toast Notice */}
+      {nextLevelNotice && (
+        <div className="fixed top-8 left-1/2 -translate-x-1/2 z-50 bg-gradient-to-r from-cyan-600 to-blue-600 text-white px-6 py-3.5 rounded-2xl shadow-2xl border border-cyan-300 font-extrabold text-sm flex items-center gap-3 animate-bounce">
+          <span>{nextLevelNotice}</span>
+        </div>
       )}
 
       {/* Game Over Screen */}
@@ -277,6 +375,21 @@ export default function App() {
         isOpen={isAudioModalOpen}
         onClose={() => setIsAudioModalOpen(false)}
         currentStage={stage}
+      />
+
+      {/* Admin Panel Modal (Desbloquear todo, trucos y saltos de nivel) */}
+      <AdminPanelModal
+        isOpen={isAdminModalOpen}
+        onClose={() => setIsAdminModalOpen(false)}
+        engine={engineRef.current}
+        adminUnlockAll={adminUnlockAll}
+        onToggleAdminUnlockAll={handleToggleAdminUnlockAll}
+        nanovalenWins={nanovalenWins}
+        onSetWins={handleSetWins}
+        selectedSkin={selectedSkin}
+        onSelectSkin={handleSelectSkin}
+        currentStage={stage}
+        onJumpStage={handleJumpStage}
       />
     </div>
   );

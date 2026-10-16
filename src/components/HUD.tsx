@@ -1,7 +1,29 @@
 import React from 'react';
 import { GameEngine } from '../game/gameEngine';
 import { soundManager } from '../audio/soundManager';
-import { Volume2, VolumeX, Shield, Flame, Zap, Crosshair, Sparkles, Heart, Music } from 'lucide-react';
+import { CHARACTER_SKINS } from '../game/skins';
+import {
+  Volume2,
+  VolumeX,
+  Shield,
+  Flame,
+  Zap,
+  Crosshair,
+  Sparkles,
+  Heart,
+  Music,
+  Radio,
+  Eye,
+  ShieldAlert,
+  Sun,
+  Wind,
+  Clock,
+  Compass,
+  Hammer,
+  Sword,
+  Sparkle,
+  Crown,
+} from 'lucide-react';
 
 interface HUDProps {
   engine: GameEngine;
@@ -11,7 +33,10 @@ interface HUDProps {
   onPowerBurst: () => void;
   onShield: () => void;
   onHeal: () => void;
+  onSpecial1?: () => void;
+  onSpecial2?: () => void;
   onOpenAudioModal?: () => void;
+  onOpenAdminModal?: () => void;
   isMuted: boolean;
   onToggleMute: () => void;
 }
@@ -24,13 +49,17 @@ export const HUD: React.FC<HUDProps> = ({
   onPowerBurst,
   onShield,
   onHeal,
+  onSpecial1,
+  onSpecial2,
   onOpenAudioModal,
+  onOpenAdminModal,
   isMuted,
   onToggleMute,
 }) => {
   const player = engine.player;
   const boss = engine.boss;
   const stage = engine.stage;
+  const skinConfig = CHARACTER_SKINS[player.skin] || CHARACTER_SKINS.catvalen;
 
   if (stage === 'cinematic_earth_destruction') {
     return (
@@ -53,44 +82,116 @@ export const HUD: React.FC<HUDProps> = ({
   const lightningCdPercent = player.lightningCooldown > 0 ? (player.lightningCooldown / player.lightningMaxCooldown) * 100 : 0;
   const burstCdPercent = player.powerBurstCooldown > 0 ? (player.powerBurstCooldown / player.powerBurstMaxCooldown) * 100 : 0;
   const shieldCdPercent = player.shieldCooldown > 0 ? (player.shieldCooldown / player.shieldMaxCooldown) * 100 : 0;
-  const healCdPercent = player.healCooldown > 0 ? (player.healCooldown / 0.9) * 100 : 0;
+  const healCdPercent = player.healCooldown > 0 ? (player.healCooldown / 0.85) * 100 : 0;
+  const special1CdPercent = player.special1Cooldown > 0 ? (player.special1Cooldown / (player.special1MaxCooldown || 6.0)) * 100 : 0;
+  const special2CdPercent = player.special2Cooldown > 0 ? (player.special2Cooldown / (player.special2MaxCooldown || 4.0)) * 100 : 0;
 
   const punchCd = player.punchCooldown > 0;
   const fireballCd = player.fireballCooldown > 0;
   const lightningCd = player.lightningCooldown > 0;
   const burstCd = player.powerBurstCooldown > 0;
   const healCd = player.healCooldown > 0;
+  const special1Cd = player.special1Cooldown > 0 || player.greenBeamCharging;
+  const special2Cd = player.special2Cooldown > 0;
 
   return (
     <div className="absolute inset-0 pointer-events-none flex flex-col justify-between p-3 select-none">
+      {/* Active Special Status Banners (Time stop, green beam, mind control) */}
+      <div className="absolute top-20 inset-x-0 flex flex-col items-center gap-1.5 pointer-events-none z-30">
+        {player.greenBeamCharging && (
+          <div className="bg-emerald-950/90 border-2 border-emerald-400 text-emerald-200 px-4 py-1.5 rounded-full shadow-2xl flex items-center gap-2 text-xs font-black animate-pulse">
+            <Radio className="w-4 h-4 text-emerald-400 animate-spin" />
+            <span>⚡ CARGANDO RAYO VERDE: {(4.0 - player.greenBeamChargeTimer).toFixed(1)}s (INMÓVIL)</span>
+          </div>
+        )}
+        {player.greenBeamFiring && (
+          <div className="bg-emerald-600/90 border-2 border-white text-white px-5 py-1.5 rounded-full shadow-2xl flex items-center gap-2 text-xs font-black animate-bounce">
+            <Zap className="w-4 h-4 text-amber-300" />
+            <span>💥 ¡MEGA-RAYO VERDE DISPARANDO!</span>
+          </div>
+        )}
+        {player.timeStopActive && (
+          <div className="bg-amber-950/90 border-2 border-amber-400 text-amber-200 px-5 py-1.5 rounded-full shadow-2xl flex items-center gap-2 text-xs font-black animate-pulse">
+            <Clock className="w-4 h-4 text-amber-400 animate-spin" />
+            <span>⏳ TIEMPO DETENIDO: {player.timeStopTimer.toFixed(1)}s (¡ATACA A NANOVALEN!)</span>
+          </div>
+        )}
+        {boss && boss.mindControlTimer && boss.mindControlTimer > 0 && (
+          <div className="bg-purple-950/90 border-2 border-fuchsia-400 text-fuchsia-200 px-4 py-1.5 rounded-full shadow-2xl flex items-center gap-2 text-xs font-black animate-pulse">
+            <Eye className="w-4 h-4 text-fuchsia-400" />
+            <span>🧠 NANOVALEN BAJO CONTROL MENTAL: SE GOLPEA A SÍ MISMO</span>
+          </div>
+        )}
+        {boss && boss.shieldDisabledTimer && boss.shieldDisabledTimer > 0 && (
+          <div className="bg-neutral-900/90 border border-fuchsia-500 text-fuchsia-300 px-3 py-1 rounded-full text-[11px] font-bold">
+            ⚡ Escudo de Nanovalen Desactivado ({boss.shieldDisabledTimer.toFixed(1)}s)
+          </div>
+        )}
+      </div>
+
       {/* Top Header Bar */}
       <div className="flex items-start justify-between gap-3 w-full">
-        {/* Catvalen Player Profile */}
+        {/* Player Profile with Active Skin Avatar */}
         <div className="flex items-center gap-3 bg-neutral-900/85 backdrop-blur-md border border-neutral-700/80 rounded-2xl p-2.5 shadow-xl max-w-sm">
-          {/* Square Cat Avatar */}
-          <div className="relative w-12 h-12 bg-neutral-700 border-2 border-neutral-900 rounded-lg flex items-center justify-center overflow-hidden shrink-0 shadow-inner">
-            {/* Square cat representation matching Image 1 */}
-            <div className="w-8 h-8 bg-zinc-400 border border-neutral-950 relative rounded-sm flex flex-col items-center justify-center">
+          {/* Avatar box */}
+          <div
+            className="relative w-12 h-12 border-2 border-neutral-900 rounded-lg flex items-center justify-center overflow-hidden shrink-0 shadow-inner"
+            style={{ backgroundColor: skinConfig.primaryColor }}
+          >
+            {/* Visual Mini Avatar representation */}
+            <div
+              className="w-8 h-8 border border-neutral-950 relative rounded-sm flex flex-col items-center justify-center"
+              style={{ backgroundColor: skinConfig.primaryColor }}
+            >
               {/* Ears */}
-              <div className="absolute -top-1.5 left-0 w-2.5 h-2.5 bg-zinc-400 border-t border-l border-neutral-950 rotate-12"></div>
-              <div className="absolute -top-1.5 right-0 w-2.5 h-2.5 bg-zinc-400 border-t border-r border-neutral-950 -rotate-12"></div>
+              {player.skin.startsWith('perro') ? (
+                <>
+                  <div
+                    className="absolute -top-1 -left-2 w-3 h-5 rounded-b-md border border-neutral-950 rotate-12"
+                    style={{ backgroundColor: skinConfig.secondaryColor }}
+                  />
+                  <div
+                    className="absolute -top-1 -right-2 w-3 h-5 rounded-b-md border border-neutral-950 -rotate-12"
+                    style={{ backgroundColor: skinConfig.secondaryColor }}
+                  />
+                </>
+              ) : (
+                <>
+                  <div
+                    className="absolute -top-1.5 left-0 w-2.5 h-2.5 border-t border-l border-neutral-950 rotate-12"
+                    style={{ backgroundColor: skinConfig.secondaryColor }}
+                  />
+                  <div
+                    className="absolute -top-1.5 right-0 w-2.5 h-2.5 border-t border-r border-neutral-950 -rotate-12"
+                    style={{ backgroundColor: skinConfig.secondaryColor }}
+                  />
+                </>
+              )}
               {/* Eyes */}
               <div className="flex gap-2">
-                <div className="w-1.5 h-2 bg-neutral-950 rounded-full"></div>
-                <div className="w-1.5 h-2 bg-neutral-950 rounded-full"></div>
+                <div className="w-1.5 h-2 bg-neutral-950 rounded-full" />
+                <div className="w-1.5 h-2 bg-neutral-950 rounded-full" />
               </div>
-              {/* Mouth :3 */}
-              <div className="text-[7px] font-bold text-neutral-950 leading-none mt-0.5">:3</div>
+              {/* Snout or smile */}
+              <div className="text-[7px] font-bold text-neutral-950 leading-none mt-0.5">
+                {player.skin.startsWith('perro') ? '▼' : ':3'}
+              </div>
             </div>
             {player.shieldActive && (
-              <div className="absolute inset-0 border-2 border-emerald-400 rounded-lg animate-pulse bg-emerald-500/20"></div>
+              <div
+                className="absolute inset-0 border-2 rounded-lg animate-pulse"
+                style={{
+                  borderColor: skinConfig.shieldColor,
+                  backgroundColor: `${skinConfig.shieldColor}30`,
+                }}
+              />
             )}
           </div>
 
           <div className="flex-1 min-w-[150px]">
             <div className="flex items-center justify-between text-xs mb-1">
               <span className="font-extrabold text-neutral-100 tracking-wide font-display text-[13px]">
-                CATVALEN
+                {skinConfig.name.toUpperCase()}
               </span>
               <span className="font-bold text-neutral-300">
                 {Math.ceil(player.hp)} / {player.maxHp} HP
@@ -111,11 +212,14 @@ export const HUD: React.FC<HUDProps> = ({
               />
             </div>
 
-            {/* Escudo Verde Active Status */}
+            {/* Shield Active Status */}
             {player.shieldActive && (
-              <div className="flex items-center gap-1.5 text-[11px] text-emerald-400 font-bold mt-1">
+              <div
+                className="flex items-center gap-1.5 text-[11px] font-bold mt-1"
+                style={{ color: skinConfig.shieldColor }}
+              >
                 <Shield className="w-3.5 h-3.5 animate-spin" />
-                <span>Escudo Verde: {player.shieldTimer.toFixed(1)}s</span>
+                <span>{skinConfig.shieldName}: {player.shieldTimer.toFixed(1)}s</span>
               </div>
             )}
           </div>
@@ -208,8 +312,18 @@ export const HUD: React.FC<HUDProps> = ({
               {/* Boss Status Badges */}
               <div className="flex items-center justify-center gap-2 mt-1.5 text-[11px] font-bold">
                 {boss.shieldActive && (
-                  <span className="bg-indigo-600/80 text-white px-2 py-0.5 rounded-full border border-indigo-400 animate-pulse">
-                    🛡️ ESCUDO ABSORBENTE ({boss.shieldTimer.toFixed(1)}s)
+                  <span className="bg-red-700/90 text-white px-2 py-0.5 rounded-full border border-red-400 animate-pulse">
+                    🛡️ ESCUDO ROJO ABSORBENTE ({boss.shieldTimer.toFixed(1)}s)
+                  </span>
+                )}
+                {boss.currentAttack === 'gravity_pull' && (
+                  <span className="bg-red-800/95 text-white px-2.5 py-0.5 rounded-full border border-rose-400 animate-pulse font-black">
+                    🧲 ¡ATRACCIÓN GRAVITATORIA! (ESCUDO REQUERIDO)
+                  </span>
+                )}
+                {engine.drones && engine.drones.length > 0 && (
+                  <span className="bg-slate-800/90 text-red-300 px-2 py-0.5 rounded-full border border-red-500/60 font-bold">
+                    🤖 {engine.drones.length} DRONES ({engine.drones.map(d => Math.ceil(d.hp)).join('/')} HP)
                   </span>
                 )}
                 {boss.currentAttack === 'laser_warning' && (
@@ -254,6 +368,18 @@ export const HUD: React.FC<HUDProps> = ({
             >
               <Music className="w-4 h-4" />
               <span className="hidden sm:inline">Música & Audio</span>
+            </button>
+          )}
+
+          {/* Admin Panel Button */}
+          {onOpenAdminModal && (
+            <button
+              onClick={onOpenAdminModal}
+              className="pointer-events-auto flex items-center gap-1.5 px-3 py-2 rounded-2xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/50 text-amber-300 hover:text-amber-200 transition-colors shadow-lg active:scale-95 text-xs font-bold cursor-pointer"
+              title="Panel de Administrador (Desbloquear todo, trucos, saltos de nivel)"
+            >
+              <Crown className="w-4 h-4 text-amber-400" />
+              <span className="hidden sm:inline">Admin</span>
             </button>
           )}
 
@@ -392,7 +518,7 @@ export const HUD: React.FC<HUDProps> = ({
             <span className="text-[9px] text-emerald-200 font-mono z-10">[SHIFT / C]</span>
           </button>
 
-          {/* 6. Heal (Curación de Catvalen) - Presiona [F], Límite 10 Usos */}
+          {/* 6. Heal */}
           <button
             onClick={onHeal}
             disabled={healCd || player.healsRemaining <= 0 || player.hp >= player.maxHp}
@@ -403,7 +529,7 @@ export const HUD: React.FC<HUDProps> = ({
                 ? 'bg-neutral-800/70 border-emerald-800 text-neutral-400 cursor-not-allowed'
                 : 'bg-gradient-to-b from-emerald-500/90 to-green-700/90 hover:from-emerald-400 hover:to-green-600 border-emerald-400 text-white shadow-[0_0_12px_rgba(16,185,129,0.35)] cursor-pointer'
             }`}
-            title={`Curarse [F] - Usos restantes: ${player.healsRemaining}/10`}
+            title={`Curarse [F] - Usos restantes: ${player.healsRemaining}/${player.maxHeals}`}
           >
             {healCdPercent > 0 && (
               <div
@@ -429,15 +555,109 @@ export const HUD: React.FC<HUDProps> = ({
               [F] ({player.healsRemaining})
             </span>
           </button>
+
+          {/* 7. Special Ability 1 (For non-Catvalen skins) */}
+          {player.skin !== 'catvalen' && onSpecial1 && (
+            <button
+              onClick={onSpecial1}
+              disabled={special1Cd}
+              className={`relative flex flex-col items-center justify-center w-14 h-14 rounded-xl border font-bold transition-all active:scale-95 overflow-hidden ${
+                special1Cd
+                  ? 'bg-neutral-800/60 border-neutral-700 text-neutral-400 cursor-not-allowed'
+                  : player.skin === 'gata_gris'
+                  ? 'bg-gradient-to-b from-emerald-600 to-green-800 border-emerald-400 text-white shadow-[0_0_12px_#22c55e]'
+                  : player.skin === 'gato_negro_blanco'
+                  ? 'bg-gradient-to-b from-fuchsia-600 to-purple-800 border-fuchsia-400 text-white shadow-[0_0_12px_#d946ef]'
+                  : player.skin === 'gato_blanco_manchas'
+                  ? 'bg-gradient-to-b from-amber-500 to-yellow-600 border-yellow-300 text-white shadow-[0_0_12px_#facc15]'
+                  : player.skin === 'gata_azul_manchas'
+                  ? 'bg-gradient-to-b from-teal-500 to-cyan-700 border-teal-300 text-white shadow-[0_0_12px_#14b8a6]'
+                  : 'bg-gradient-to-b from-amber-600 to-orange-800 border-amber-400 text-white shadow-[0_0_12px_#f59e0b]'
+              }`}
+              title={skinConfig.abilities[0]?.name || 'Poder Especial 1'}
+            >
+              {special1CdPercent > 0 && (
+                <div
+                  className="absolute inset-x-0 bottom-0 bg-neutral-950/75 transition-all"
+                  style={{ height: `${special1CdPercent}%` }}
+                />
+              )}
+              {player.skin === 'gata_gris' && <Radio className="w-5 h-5 text-emerald-200 mb-0.5 z-10 animate-pulse" />}
+              {player.skin === 'gato_negro_blanco' && <Eye className="w-5 h-5 text-fuchsia-200 mb-0.5 z-10" />}
+              {player.skin === 'gato_blanco_manchas' && <Sun className="w-5 h-5 text-yellow-200 mb-0.5 z-10" />}
+              {player.skin === 'gata_azul_manchas' && <Sparkle className="w-5 h-5 text-teal-200 mb-0.5 z-10" />}
+              {player.skin === 'perro_rubio' && <Hammer className="w-5 h-5 text-amber-200 mb-0.5 z-10" />}
+              {player.skin === 'perro_marron' && <Clock className="w-5 h-5 text-amber-200 mb-0.5 z-10 animate-spin" />}
+              <span className="text-[9px] font-black leading-none z-10 uppercase">
+                {special1Cd
+                  ? `${player.special1Cooldown.toFixed(1)}s`
+                  : player.skin === 'gata_gris'
+                  ? 'RAYO V.'
+                  : player.skin === 'gato_negro_blanco'
+                  ? 'AUTO-HIT'
+                  : player.skin === 'gato_blanco_manchas'
+                  ? 'LÁSER'
+                  : player.skin === 'gata_azul_manchas'
+                  ? 'ORBES'
+                  : player.skin === 'perro_rubio'
+                  ? 'YUNQUE'
+                  : 'TIEMPO'}
+              </span>
+              <span className="text-[8px] font-mono text-neutral-300 z-10">[4 / G]</span>
+            </button>
+          )}
+
+          {/* 8. Special Ability 2 (For skins with secondary power) */}
+          {['gato_negro_blanco', 'gato_blanco_manchas', 'perro_rubio', 'perro_marron'].includes(player.skin) && onSpecial2 && (
+            <button
+              onClick={onSpecial2}
+              disabled={special2Cd}
+              className={`relative flex flex-col items-center justify-center w-14 h-14 rounded-xl border font-bold transition-all active:scale-95 overflow-hidden ${
+                special2Cd
+                  ? 'bg-neutral-800/60 border-neutral-700 text-neutral-400 cursor-not-allowed'
+                  : player.skin === 'gato_negro_blanco'
+                  ? 'bg-gradient-to-b from-purple-700 to-indigo-900 border-purple-400 text-white shadow-[0_0_12px_#a855f7]'
+                  : player.skin === 'gato_blanco_manchas'
+                  ? 'bg-gradient-to-b from-yellow-500 to-amber-600 border-yellow-200 text-white shadow-[0_0_12px_#fbbf24]'
+                  : player.skin === 'perro_rubio'
+                  ? 'bg-gradient-to-b from-amber-600 to-yellow-700 border-amber-300 text-white shadow-[0_0_12px_#f59e0b]'
+                  : 'bg-gradient-to-b from-orange-600 to-amber-800 border-amber-300 text-white shadow-[0_0_12px_#d97706]'
+              }`}
+              title={skinConfig.abilities[1]?.name || 'Poder Especial 2'}
+            >
+              {special2CdPercent > 0 && (
+                <div
+                  className="absolute inset-x-0 bottom-0 bg-neutral-950/75 transition-all"
+                  style={{ height: `${special2CdPercent}%` }}
+                />
+              )}
+              {player.skin === 'gato_negro_blanco' && <ShieldAlert className="w-5 h-5 text-purple-200 mb-0.5 z-10" />}
+              {player.skin === 'gato_blanco_manchas' && <Wind className="w-5 h-5 text-yellow-200 mb-0.5 z-10" />}
+              {player.skin === 'perro_rubio' && <Sword className="w-5 h-5 text-amber-200 mb-0.5 z-10" />}
+              {player.skin === 'perro_marron' && <Compass className="w-5 h-5 text-amber-200 mb-0.5 z-10" />}
+              <span className="text-[9px] font-black leading-none z-10 uppercase">
+                {special2Cd
+                  ? `${player.special2Cooldown.toFixed(1)}s`
+                  : player.skin === 'gato_negro_blanco'
+                  ? 'ROMPER'
+                  : player.skin === 'gato_blanco_manchas'
+                  ? 'DASH'
+                  : player.skin === 'perro_rubio'
+                  ? 'ESPADAS'
+                  : 'WARP'}
+              </span>
+              <span className="text-[8px] font-mono text-neutral-300 z-10">[5 / T]</span>
+            </button>
+          )}
         </div>
 
         {/* Desktop Helper Text */}
         <div className="text-[11px] text-neutral-400/90 font-medium bg-neutral-950/80 px-3 py-1 rounded-full border border-neutral-800 flex items-center gap-2 flex-wrap justify-center">
           <span>Moverse: <strong className="text-neutral-200 font-mono">WASD / Flechas</strong></span> ·
           <span>Golpear: <strong className="text-neutral-200 font-mono">Espacio</strong></span> ·
-          <span>Curarse: <strong className="text-emerald-400 font-mono">F ({player.healsRemaining}/10)</strong></span> ·
+          <span>Curarse: <strong className="text-emerald-400 font-mono">F ({player.healsRemaining}/{player.maxHeals})</strong></span> ·
           <span>Escudo: <strong className="text-emerald-400 font-mono">Shift</strong></span> ·
-          <span>Poderes: <strong className="text-amber-400 font-mono">1, 2, 3</strong></span>
+          <span>Poderes: <strong className="text-amber-400 font-mono">1, 2, 3, 4, 5</strong></span>
         </div>
       </div>
     </div>

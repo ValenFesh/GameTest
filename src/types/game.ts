@@ -1,6 +1,28 @@
 export type GameStage = 'start' | 'city' | 'transition' | 'space' | 'boss_intro' | 'boss' | 'victory' | 'gameover' | 'cinematic_earth_destruction';
 
-export type AttackType = 'punch' | 'fireball' | 'lightning' | 'power_burst';
+export type CharacterSkinId =
+  | 'catvalen'
+  | 'gata_gris'
+  | 'gato_negro_blanco'
+  | 'gato_blanco_manchas'
+  | 'gata_azul_manchas'
+  | 'perro_rubio'
+  | 'perro_marron';
+
+export type AttackType =
+  | 'punch'
+  | 'fireball'
+  | 'lightning'
+  | 'power_burst'
+  | 'green_beam'
+  | 'mind_control'
+  | 'shield_break'
+  | 'light_laser'
+  | 'magic_orb'
+  | 'energy_anvil'
+  | 'energy_blade'
+  | 'time_stop'
+  | 'teleport';
 
 export interface Player {
   x: number;
@@ -16,10 +38,11 @@ export interface Player {
   shieldMaxDuration: number;
   shieldCooldown: number; // seconds remaining
   shieldMaxCooldown: number;
+  shieldColor?: string;
   // Floating circular paws
   leftHand: { x: number; y: number; punchProgress: number };
   rightHand: { x: number; y: number; punchProgress: number };
-  // Cooldowns with their maximum base times
+  // Base Cooldowns
   punchCooldown: number;
   punchMaxCooldown: number;
   fireballCooldown: number;
@@ -28,7 +51,7 @@ export interface Player {
   lightningMaxCooldown: number;
   powerBurstCooldown: number;
   powerBurstMaxCooldown: number;
-  // Heal ability (Press F, max 10 uses)
+  // Heal ability (Press F)
   healsRemaining: number;
   maxHeals: number;
   healCooldown: number;
@@ -37,11 +60,51 @@ export interface Player {
   facing: 1 | -1;
   eyeState: 'normal' | 'squint' | 'blink' | 'fierce' | 'hurt';
   animationTime: number;
+
+  // --- Active Character Skin ---
+  skin: CharacterSkinId;
+
+  // --- Special Abilities for Skins ---
+  special1Cooldown: number;
+  special1MaxCooldown: number;
+  special2Cooldown: number;
+  special2MaxCooldown: number;
+
+  // Gata Gris: Green Ray (4s charge, immobile during charge)
+  greenBeamCharging: boolean;
+  greenBeamChargeTimer: number; // 0 to 4.0s
+  greenBeamChargeMax: number;
+  greenBeamFiring: boolean;
+  greenBeamFiringTimer: number;
+
+  // Gato Negro con Blanco: Mind Control & Shield Break
+  mindControlActive: boolean;
+  mindControlTimer: number;
+
+  // Perro Marrón: Time Stop (za warudo) & Teleport
+  timeStopActive: boolean;
+  timeStopTimer: number;
+  timeStopMaxDuration: number;
+
+  // Gata Azul: Passive regen accumulator
+  healRegenAccumulator: number;
 }
 
 export interface Projectile {
   id: string;
-  type: 'player_fireball' | 'player_lightning' | 'player_burst' | 'boss_meteor' | 'boss_energy';
+  type:
+    | 'player_fireball'
+    | 'player_lightning'
+    | 'player_burst'
+    | 'player_green_beam'
+    | 'player_light_laser'
+    | 'player_magic_orb'
+    | 'player_energy_anvil'
+    | 'player_energy_blade'
+    | 'boss_meteor'
+    | 'boss_energy'
+    | 'boss_drone_laser'
+    | 'boss_pulse_laser';
   x: number;
   y: number;
   vx: number;
@@ -54,6 +117,10 @@ export interface Projectile {
   glowColor: string;
   trail: { x: number; y: number; alpha: number }[];
   isBlackFlash?: boolean;
+  width?: number;
+  height?: number;
+  scale?: number;
+  targetId?: string;
 }
 
 export interface Obstacle {
@@ -77,7 +144,32 @@ export interface Obstacle {
   isSplit?: boolean;
 }
 
-export type BossAttack = 'idle' | 'meteor_storm' | 'laser_warning' | 'laser_fire' | 'energy_shield' | 'gamma_ray_charge' | 'gamma_ray_burst';
+export type BossAttack =
+  | 'idle'
+  | 'meteor_storm'
+  | 'laser_warning'
+  | 'laser_fire'
+  | 'energy_shield'
+  | 'gamma_ray_charge'
+  | 'gamma_ray_burst'
+  | 'drone_spawn'
+  | 'gravity_pull';
+
+export interface BossDrone {
+  id: string;
+  x: number;
+  y: number;
+  hp: number;
+  maxHp: number; // 300 HP
+  vx: number;
+  vy: number;
+  targetY: number;
+  pattern: 'sweep' | 'pulse' | 'tracker';
+  shootTimer: number;
+  shootCooldown: number;
+  angle: number;
+  size: number;
+}
 
 export interface Boss {
   x: number;
@@ -107,6 +199,17 @@ export interface Boss {
   floatOffset: number;
   introTimer: number;
   isBlackFlashing?: boolean;
+  // Mind control & puppet self-punch
+  mindControlTimer?: number;
+  mindControlSelfPunchCount?: number;
+  shieldDisabledTimer?: number;
+  // Melee floating fists & punches
+  leftHand: { x: number; y: number; punchProgress: number };
+  rightHand: { x: number; y: number; punchProgress: number };
+  punchCooldown: number;
+  // Gravity pull grapple
+  pullTimer?: number;
+  pullHandExtended?: number;
 }
 
 export interface Particle {
@@ -156,6 +259,8 @@ export interface GameStats {
   totalAttacksLanded: number;
   timeElapsed: number; // seconds
   deathReason?: 'standard' | 'gamma_ray';
+  nanovalenWins?: number;
+  unlockedSkinNotice?: string;
 }
 
 export interface CinematicState {

@@ -1,6 +1,7 @@
 import {
   BlackFlashStrike,
   Boss,
+  BossDrone,
   CinematicState,
   DamageNumber,
   GameStage,
@@ -267,138 +268,427 @@ export class GameRenderer {
       ctx.restore();
     }
 
-    // --- Green Shield (Escudo Verde) ---
+    // --- Character Shield ---
     if (player.shieldActive) {
       ctx.save();
       const shieldRadius = Math.max(w, h) * 0.78 + Math.sin(time * 10) * 3;
-      
+      const shieldColor = player.shieldColor || '#10b981';
+
       // Outer glow
       const shieldGrad = ctx.createRadialGradient(0, 0, shieldRadius * 0.6, 0, 0, shieldRadius);
-      shieldGrad.addColorStop(0, 'rgba(52, 211, 153, 0.12)');
-      shieldGrad.addColorStop(0.8, 'rgba(16, 185, 129, 0.35)');
-      shieldGrad.addColorStop(1, 'rgba(5, 150, 105, 0.85)');
+      shieldGrad.addColorStop(0, 'rgba(255, 255, 255, 0.08)');
+      shieldGrad.addColorStop(0.8, shieldColor + '40');
+      shieldGrad.addColorStop(1, shieldColor + 'dd');
       ctx.fillStyle = shieldGrad;
       ctx.beginPath();
       ctx.arc(0, 0, shieldRadius, 0, Math.PI * 2);
       ctx.fill();
 
       // Shield ring
-      ctx.strokeStyle = '#34d399';
+      ctx.strokeStyle = shieldColor;
       ctx.lineWidth = 3.5;
       ctx.setLineDash([12, 6]);
       ctx.lineDashOffset = -time * 30;
       ctx.stroke();
 
-      // Inner hex / energy sparks
-      ctx.strokeStyle = 'rgba(110, 231, 183, 0.6)';
-      ctx.lineWidth = 1.5;
+      // Inner details
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 1.2;
       ctx.setLineDash([]);
       ctx.beginPath();
       ctx.arc(0, 0, shieldRadius * 0.85, 0, Math.PI * 2);
       ctx.stroke();
 
+      // Extra shield ornamentation depending on skin
+      if (player.skin === 'perro_marron') {
+        // Chrono clock markers
+        ctx.fillStyle = '#fbbf24';
+        for (let i = 0; i < 8; i++) {
+          const cAng = (i * Math.PI * 2) / 8 + time * 2;
+          ctx.beginPath();
+          ctx.arc(Math.cos(cAng) * shieldRadius * 0.9, Math.sin(cAng) * shieldRadius * 0.9, 2.5, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      } else if (player.skin === 'gato_blanco_manchas') {
+        // Light photon flares
+        ctx.strokeStyle = '#fef08a';
+        ctx.lineWidth = 2;
+        for (let i = 0; i < 4; i++) {
+          const fAng = (i * Math.PI) / 2 + time * 3;
+          ctx.beginPath();
+          ctx.moveTo(Math.cos(fAng) * shieldRadius * 0.7, Math.sin(fAng) * shieldRadius * 0.7);
+          ctx.lineTo(Math.cos(fAng) * shieldRadius * 1.15, Math.sin(fAng) * shieldRadius * 1.15);
+          ctx.stroke();
+        }
+      }
+
       ctx.restore();
     }
 
-    // --- Floating Circular Hands (Manos Circulares de Catvalen) ---
-    // User requested: "golpear con sus manos a los enemigos (con sus manos circulares)"
+    // --- Floating Circular Hands / Paws ---
     this.drawPlayerHands(player, time);
 
-    // --- Cat Body (Square Cat from Image 1) ---
-    // Grey body (#7c7f86), thick black hand-drawn line (#161616), square with pointy cat ears
-    ctx.fillStyle = '#7a7d83';
-    ctx.strokeStyle = '#121214';
-    ctx.lineWidth = 5;
-    ctx.lineJoin = 'round';
-    ctx.lineCap = 'round';
+    // --- Character Body Rendering by Skin ---
+    const isDog = player.skin === 'perro_rubio' || player.skin === 'perro_marron';
 
-    ctx.beginPath();
-    // Start at bottom-left corner
-    const r = 6; // slightly rounded base
-    ctx.moveTo(-halfW + r, halfH);
-    // Bottom edge
-    ctx.lineTo(halfW - r, halfH);
-    ctx.quadraticCurveTo(halfW, halfH, halfW, halfH - r);
-    // Right edge going up towards right ear tip
-    ctx.lineTo(halfW, -halfH + 18);
-    // Right Ear tip: points up sharp
-    ctx.lineTo(halfW - 2, -halfH - 12);
-    // Ear inner slope down to center dip
-    ctx.quadraticCurveTo(halfW * 0.5, -halfH + 8, 0, -halfH + 4);
-    // Ear inner slope up to Left Ear tip
-    ctx.quadraticCurveTo(-halfW * 0.5, -halfH + 8, -halfW + 2, -halfH - 12);
-    // Left edge going down
-    ctx.lineTo(-halfW, -halfH + 18);
-    ctx.lineTo(-halfW, halfH - r);
-    ctx.quadraticCurveTo(-halfW, halfH, -halfW + r, halfH);
-    ctx.closePath();
+    if (isDog) {
+      // --- SQUARE DOG RENDERING (Perro Rubio & Perro Marrón) ---
+      const furColor = player.skin === 'perro_rubio' ? '#facc15' : '#78350f';
+      const earColor = player.skin === 'perro_rubio' ? '#eab308' : '#5c2b09';
+      const snoutColor = player.skin === 'perro_rubio' ? '#fde047' : '#92400e';
 
-    ctx.fill();
-    ctx.stroke();
-
-    // --- Cat Eyes (Black ovals from Image 1) ---
-    ctx.fillStyle = '#111111';
-    const eyeOffsetX = 12;
-    const eyeOffsetY = -2;
-    const eyeRadiusX = 6;
-    const eyeRadiusY = 7.5;
-
-    if (player.eyeState === 'blink') {
-      // Blinking slit
+      // Wagging tail on left
+      const tailWag = Math.sin(time * 18) * 12;
+      ctx.save();
+      ctx.strokeStyle = furColor;
+      ctx.lineWidth = 7;
+      ctx.lineCap = 'round';
       ctx.beginPath();
-      ctx.ellipse(-eyeOffsetX, eyeOffsetY, eyeRadiusX, 1.5, 0, 0, Math.PI * 2);
-      ctx.ellipse(eyeOffsetX, eyeOffsetY, eyeRadiusX, 1.5, 0, 0, Math.PI * 2);
-      ctx.fill();
-    } else if (player.eyeState === 'squint' || player.eyeState === 'hurt') {
-      // Squinting angry / fierce
-      ctx.beginPath();
-      ctx.arc(-eyeOffsetX, eyeOffsetY, eyeRadiusX, 0.2 * Math.PI, 0.8 * Math.PI, false);
-      ctx.arc(eyeOffsetX, eyeOffsetY, eyeRadiusX, 0.2 * Math.PI, 0.8 * Math.PI, false);
-      ctx.lineWidth = 3.5;
+      ctx.moveTo(-halfW + 4, halfH - 12);
+      ctx.quadraticCurveTo(-halfW - 14, halfH - 24 + tailWag, -halfW - 20, halfH - 16 + tailWag);
       ctx.stroke();
+      ctx.restore();
+
+      // Dog Square Body
+      ctx.fillStyle = furColor;
+      ctx.strokeStyle = '#141416';
+      ctx.lineWidth = 5;
+      ctx.lineJoin = 'round';
+      ctx.lineCap = 'round';
+
+      ctx.beginPath();
+      const r = 8;
+      ctx.roundRect(-halfW, -halfH, w, h, r);
+      ctx.fill();
+      ctx.stroke();
+
+      // Floppy Dog Ears (Hanging down beside the square head)
+      const earFlap = Math.sin(time * 8) * 3;
+      // Left Ear
+      ctx.fillStyle = earColor;
+      ctx.strokeStyle = '#141416';
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.moveTo(-halfW + 6, -halfH + 4);
+      ctx.quadraticCurveTo(-halfW - 14, -halfH + 8, -halfW - 10, -halfH + 28 + earFlap);
+      ctx.quadraticCurveTo(-halfW - 2, -halfH + 34 + earFlap, -halfW + 12, -halfH + 16);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+
+      // Right Ear
+      ctx.beginPath();
+      ctx.moveTo(halfW - 6, -halfH + 4);
+      ctx.quadraticCurveTo(halfW + 14, -halfH + 8, halfW + 10, -halfH + 28 + earFlap);
+      ctx.quadraticCurveTo(halfW + 2, -halfH + 34 + earFlap, halfW - 12, -halfH + 16);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+
+      // Dog Snout / Muzzle
+      ctx.fillStyle = snoutColor;
+      ctx.beginPath();
+      ctx.ellipse(0, 6, 15, 11, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Dog Black Nose
+      ctx.fillStyle = '#111111';
+      ctx.beginPath();
+      ctx.moveTo(-6, 2);
+      ctx.lineTo(6, 2);
+      ctx.lineTo(0, 9);
+      ctx.closePath();
+      ctx.fill();
+
+      // Dog cute mouth line
+      ctx.strokeStyle = '#18181b';
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.moveTo(0, 9);
+      ctx.lineTo(0, 14);
+      ctx.arc(-4, 14, 4, 0, Math.PI * 0.8, false);
+      ctx.moveTo(0, 14);
+      ctx.arc(4, 14, 4, Math.PI * 0.2, Math.PI, false);
+      ctx.stroke();
+
+      // Dog Eyes
+      const eyeOffsetX = 12;
+      const eyeOffsetY = -5;
+      if (player.skin === 'perro_marron') {
+        // Chrono Clock Dial Eyes!
+        ctx.fillStyle = '#f59e0b';
+        ctx.beginPath();
+        ctx.arc(-eyeOffsetX, eyeOffsetY, 7, 0, Math.PI * 2);
+        ctx.arc(eyeOffsetX, eyeOffsetY, 7, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = '#78350f';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        // Clock hand ticks inside eyes
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 1.5;
+        [-eyeOffsetX, eyeOffsetX].forEach(ex => {
+          ctx.beginPath();
+          ctx.moveTo(ex, eyeOffsetY);
+          ctx.lineTo(ex + Math.cos(time * 6) * 4, eyeOffsetY + Math.sin(time * 6) * 4);
+          ctx.stroke();
+        });
+      } else {
+        // Loyal round canine eyes
+        ctx.fillStyle = '#111111';
+        ctx.beginPath();
+        ctx.arc(-eyeOffsetX, eyeOffsetY, 6, 0, Math.PI * 2);
+        ctx.arc(eyeOffsetX, eyeOffsetY, 6, 0, Math.PI * 2);
+        ctx.fill();
+        // Twinkle
+        ctx.fillStyle = '#ffffff';
+        ctx.beginPath();
+        ctx.arc(-eyeOffsetX - 2, eyeOffsetY - 2, 2, 0, Math.PI * 2);
+        ctx.arc(eyeOffsetX - 2, eyeOffsetY - 2, 2, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
     } else {
-      // Normal cute black oval eyes
-      ctx.beginPath();
-      ctx.ellipse(-eyeOffsetX, eyeOffsetY, eyeRadiusX, eyeRadiusY, 0, 0, Math.PI * 2);
-      ctx.fill();
+      // --- SQUARE CAT RENDERING (Catvalen, Gata Gris, Gato Negro/Blanco, Gato Blanco Manchas, Gata Azul) ---
+      let bodyFill = '#7a7d83';
+      let earInner = '#5a5d63';
+
+      if (player.skin === 'gata_gris') {
+        bodyFill = '#d1d5db';
+        earInner = '#fbcfe8';
+      } else if (player.skin === 'gato_negro_blanco') {
+        bodyFill = '#171717';
+        earInner = '#262626';
+      } else if (player.skin === 'gato_blanco_manchas') {
+        bodyFill = '#f8fafc';
+        earInner = '#fed7aa';
+      } else if (player.skin === 'gata_azul_manchas') {
+        bodyFill = '#7dd3fc';
+        earInner = '#a7f3d0';
+      }
+
+      ctx.fillStyle = bodyFill;
+      ctx.strokeStyle = '#121214';
+      ctx.lineWidth = 5;
+      ctx.lineJoin = 'round';
+      ctx.lineCap = 'round';
 
       ctx.beginPath();
-      ctx.ellipse(eyeOffsetX, eyeOffsetY, eyeRadiusX, eyeRadiusY, 0, 0, Math.PI * 2);
+      const r = 6;
+      ctx.moveTo(-halfW + r, halfH);
+      ctx.lineTo(halfW - r, halfH);
+      ctx.quadraticCurveTo(halfW, halfH, halfW, halfH - r);
+      ctx.lineTo(halfW, -halfH + 18);
+      ctx.lineTo(halfW - 2, -halfH - 12);
+      ctx.quadraticCurveTo(halfW * 0.5, -halfH + 8, 0, -halfH + 4);
+      ctx.quadraticCurveTo(-halfW * 0.5, -halfH + 8, -halfW + 2, -halfH - 12);
+      ctx.lineTo(-halfW, -halfH + 18);
+      ctx.lineTo(-halfW, halfH - r);
+      ctx.quadraticCurveTo(-halfW, halfH, -halfW + r, halfH);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+
+      // Ear Inner Details
+      ctx.fillStyle = earInner;
+      ctx.beginPath();
+      // Left ear inner
+      ctx.moveTo(-halfW + 5, -halfH + 12);
+      ctx.lineTo(-halfW + 3, -halfH - 6);
+      ctx.lineTo(-halfW + 16, -halfH + 7);
+      ctx.closePath();
+      ctx.fill();
+      // Right ear inner
+      ctx.beginPath();
+      ctx.moveTo(halfW - 5, -halfH + 12);
+      ctx.lineTo(halfW - 3, -halfH - 6);
+      ctx.lineTo(halfW - 16, -halfH + 7);
+      ctx.closePath();
       ctx.fill();
 
-      // Tiny white highlight twinkle
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+      // Skin-specific spots & patterns
+      if (player.skin === 'gato_negro_blanco') {
+        // White tuxedo bib / chest patch
+        ctx.fillStyle = '#f8fafc';
+        ctx.beginPath();
+        ctx.moveTo(0, -halfH + 12);
+        ctx.lineTo(halfW * 0.65, halfH);
+        ctx.lineTo(-halfW * 0.65, halfH);
+        ctx.closePath();
+        ctx.fill();
+        // White chin muzzle
+        ctx.beginPath();
+        ctx.ellipse(0, 10, 11, 7, 0, 0, Math.PI * 2);
+        ctx.fill();
+      } else if (player.skin === 'gato_blanco_manchas') {
+        // Calico orange & brown spots
+        ctx.fillStyle = '#ea580c';
+        ctx.beginPath();
+        ctx.ellipse(-halfW + 12, -halfH + 8, 12, 10, 0.4, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#78350f';
+        ctx.beginPath();
+        ctx.ellipse(halfW - 10, halfH - 12, 14, 11, -0.3, 0, Math.PI * 2);
+        ctx.fill();
+      } else if (player.skin === 'gata_azul_manchas') {
+        // Deep turquoise spots
+        ctx.fillStyle = '#0284c7';
+        ctx.beginPath();
+        ctx.ellipse(-halfW + 14, -halfH + 12, 10, 8, 0.2, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.ellipse(halfW - 12, halfH - 10, 11, 8, -0.2, 0, Math.PI * 2);
+        ctx.fill();
+      } else if (player.skin === 'gata_gris') {
+        // Cute blush
+        ctx.fillStyle = 'rgba(244, 114, 182, 0.55)';
+        ctx.beginPath();
+        ctx.ellipse(-18, 5, 5, 3.5, 0, 0, Math.PI * 2);
+        ctx.ellipse(18, 5, 5, 3.5, 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      // Eyes
+      let eyeColor = '#111111';
+      if (player.skin === 'gato_negro_blanco') eyeColor = '#c084fc';
+      if (player.skin === 'gato_blanco_manchas') eyeColor = '#facc15';
+
+      ctx.fillStyle = eyeColor;
+      const eyeOffsetX = 12;
+      const eyeOffsetY = -2;
+      const eyeRadiusX = 6;
+      const eyeRadiusY = 7.5;
+
+      if (player.eyeState === 'blink') {
+        ctx.beginPath();
+        ctx.ellipse(-eyeOffsetX, eyeOffsetY, eyeRadiusX, 1.5, 0, 0, Math.PI * 2);
+        ctx.ellipse(eyeOffsetX, eyeOffsetY, eyeRadiusX, 1.5, 0, 0, Math.PI * 2);
+        ctx.fill();
+      } else if (player.eyeState === 'squint' || player.eyeState === 'hurt') {
+        ctx.beginPath();
+        ctx.arc(-eyeOffsetX, eyeOffsetY, eyeRadiusX, 0.2 * Math.PI, 0.8 * Math.PI, false);
+        ctx.arc(eyeOffsetX, eyeOffsetY, eyeRadiusX, 0.2 * Math.PI, 0.8 * Math.PI, false);
+        ctx.lineWidth = 3.5;
+        ctx.strokeStyle = '#111111';
+        ctx.stroke();
+      } else {
+        ctx.beginPath();
+        ctx.ellipse(-eyeOffsetX, eyeOffsetY, eyeRadiusX, eyeRadiusY, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.ellipse(eyeOffsetX, eyeOffsetY, eyeRadiusX, eyeRadiusY, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        // White twinkle
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
+        ctx.beginPath();
+        ctx.arc(-eyeOffsetX - 2, eyeOffsetY - 2.5, 2, 0, Math.PI * 2);
+        ctx.arc(eyeOffsetX - 2, eyeOffsetY - 2.5, 2, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Feminine lashes for Gata Gris & Gata Azul
+        if (player.skin === 'gata_gris' || player.skin === 'gata_azul_manchas') {
+          ctx.strokeStyle = '#111111';
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          // Left lashes
+          ctx.moveTo(-eyeOffsetX - 4, eyeOffsetY - 6);
+          ctx.lineTo(-eyeOffsetX - 8, eyeOffsetY - 9);
+          // Right lashes
+          ctx.moveTo(eyeOffsetX + 4, eyeOffsetY - 6);
+          ctx.lineTo(eyeOffsetX + 8, eyeOffsetY - 9);
+          ctx.stroke();
+        }
+      }
+
+      // Mouth (:3 cute cat smile)
+      ctx.strokeStyle = '#141416';
+      ctx.lineWidth = 3.5;
       ctx.beginPath();
-      ctx.arc(-eyeOffsetX - 2, eyeOffsetY - 2.5, 2, 0, Math.PI * 2);
-      ctx.arc(eyeOffsetX - 2, eyeOffsetY - 2.5, 2, 0, Math.PI * 2);
-      ctx.fill();
+      ctx.arc(-5, 12, 5, 0.1 * Math.PI, 0.9 * Math.PI, false);
+      ctx.arc(5, 12, 5, 0.1 * Math.PI, 0.9 * Math.PI, false);
+      ctx.stroke();
+
+      // Whiskers
+      ctx.lineWidth = 3.2;
+      ctx.beginPath();
+      ctx.moveTo(-18, 9);
+      ctx.quadraticCurveTo(-28, 7, -36, 10);
+      ctx.moveTo(-17, 16);
+      ctx.quadraticCurveTo(-27, 18, -35, 23);
+      ctx.moveTo(18, 9);
+      ctx.quadraticCurveTo(28, 7, 36, 10);
+      ctx.moveTo(17, 16);
+      ctx.quadraticCurveTo(27, 18, 35, 23);
+      ctx.stroke();
     }
 
-    // --- Cat Mouth (:3 cute cat smile from Image 1) ---
-    ctx.strokeStyle = '#141416';
-    ctx.lineWidth = 3.5;
-    ctx.beginPath();
-    // Left curve of :3
-    ctx.arc(-5, 12, 5, 0.1 * Math.PI, 0.9 * Math.PI, false);
-    // Right curve of :3
-    ctx.arc(5, 12, 5, 0.1 * Math.PI, 0.9 * Math.PI, false);
-    ctx.stroke();
+    // --- Gata Gris Green Beam Charge FX & Laser Beam ---
+    if (player.greenBeamCharging) {
+      ctx.save();
+      const chargeProgress = Math.min(1, player.greenBeamChargeTimer / player.greenBeamChargeMax);
+      const ringRadius = 55 * (1 - chargeProgress) + 18;
 
-    // --- Whiskers (from Image 1: 2 curved whiskers on left, 2 on right) ---
-    ctx.lineWidth = 3.2;
-    ctx.beginPath();
-    // Left whiskers
-    ctx.moveTo(-18, 9);
-    ctx.quadraticCurveTo(-28, 7, -36, 10);
-    ctx.moveTo(-17, 16);
-    ctx.quadraticCurveTo(-27, 18, -35, 23);
+      ctx.strokeStyle = '#22c55e';
+      ctx.lineWidth = 3.5;
+      ctx.beginPath();
+      ctx.arc(0, 0, ringRadius, 0, Math.PI * 2);
+      ctx.stroke();
 
-    // Right whiskers
-    ctx.moveTo(18, 9);
-    ctx.quadraticCurveTo(28, 7, 36, 10);
-    ctx.moveTo(17, 16);
-    ctx.quadraticCurveTo(27, 18, 35, 23);
-    ctx.stroke();
+      // Electric converging arcs
+      for (let i = 0; i < 4; i++) {
+        const a = (i * Math.PI) / 2 + time * 12;
+        ctx.beginPath();
+        ctx.moveTo(Math.cos(a) * ringRadius, Math.sin(a) * ringRadius);
+        ctx.lineTo(0, 0);
+        ctx.strokeStyle = 'rgba(74, 222, 128, 0.65)';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      }
+
+      // Charge bar above head
+      ctx.fillStyle = '#0f172a';
+      ctx.fillRect(-35, -halfH - 24, 70, 8);
+      ctx.fillStyle = '#22c55e';
+      ctx.fillRect(-34, -halfH - 23, 68 * chargeProgress, 6);
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(-35, -halfH - 24, 70, 8);
+      ctx.restore();
+    }
+
+    // --- Green Beam Colossal Laser Firing ---
+    if (player.greenBeamFiring) {
+      ctx.save();
+      const beamLen = this.width + 200;
+      const beamHeight = 64 + Math.sin(time * 30) * 8;
+
+      // Outer green glow
+      const beamGrad = ctx.createLinearGradient(0, -beamHeight / 2, 0, beamHeight / 2);
+      beamGrad.addColorStop(0, 'rgba(34, 197, 94, 0)');
+      beamGrad.addColorStop(0.25, 'rgba(34, 197, 94, 0.85)');
+      beamGrad.addColorStop(0.5, '#ffffff');
+      beamGrad.addColorStop(0.75, 'rgba(34, 197, 94, 0.85)');
+      beamGrad.addColorStop(1, 'rgba(34, 197, 94, 0)');
+
+      ctx.fillStyle = beamGrad;
+      ctx.fillRect(15, -beamHeight / 2, beamLen, beamHeight);
+
+      // Core white laser beam
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(15, -10, beamLen, 20);
+
+      // Energy rings traveling along beam
+      ctx.strokeStyle = '#86efac';
+      ctx.lineWidth = 4;
+      for (let r = 0; r < 6; r++) {
+        const ringX = 40 + ((time * 800 + r * 140) % (beamLen - 80));
+        ctx.beginPath();
+        ctx.ellipse(ringX, 0, 14, beamHeight * 0.45, 0, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
 
     ctx.restore();
   }
@@ -407,21 +697,41 @@ export class GameRenderer {
     const ctx = this.ctx;
     const handRadius = 11;
 
-    // Left and Right hand positions with punch animation offsets
     const leftX = player.leftHand.x + player.leftHand.punchProgress * 42;
     const leftY = player.leftHand.y + Math.sin(time * 8) * 3;
-
     const rightX = player.rightHand.x + player.rightHand.punchProgress * 42;
     const rightY = player.rightHand.y + Math.cos(time * 8) * 3;
+
+    let handColor = '#82868d';
+    let padColor = '#63666d';
+
+    if (player.skin === 'gata_gris') {
+      handColor = '#d1d5db';
+      padColor = '#f472b6';
+    } else if (player.skin === 'gato_negro_blanco') {
+      handColor = '#f8fafc'; // White paws!
+      padColor = '#e2e8f0';
+    } else if (player.skin === 'gato_blanco_manchas') {
+      handColor = '#ffffff';
+      padColor = '#fef08a';
+    } else if (player.skin === 'gata_azul_manchas') {
+      handColor = '#7dd3fc';
+      padColor = '#34d399';
+    } else if (player.skin === 'perro_rubio') {
+      handColor = '#facc15';
+      padColor = '#ca8a04';
+    } else if (player.skin === 'perro_marron') {
+      handColor = '#78350f';
+      padColor = '#92400e';
+    }
 
     [
       { x: leftX, y: leftY, punch: player.leftHand.punchProgress },
       { x: rightX, y: rightY, punch: player.rightHand.punchProgress },
-    ].forEach((h, idx) => {
+    ].forEach((h) => {
       ctx.save();
-      // If punching, add speed motion trail
       if (h.punch > 0.1) {
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.55)';
         ctx.lineWidth = 3;
         ctx.beginPath();
         ctx.moveTo(h.x - h.punch * 25, h.y);
@@ -429,8 +739,7 @@ export class GameRenderer {
         ctx.stroke();
       }
 
-      // Hand circle (matching user's circular hands)
-      ctx.fillStyle = '#82868d';
+      ctx.fillStyle = handColor;
       ctx.strokeStyle = '#121214';
       ctx.lineWidth = 4;
       ctx.beginPath();
@@ -438,8 +747,8 @@ export class GameRenderer {
       ctx.fill();
       ctx.stroke();
 
-      // Paw pad detail
-      ctx.fillStyle = '#63666d';
+      // Paw pad
+      ctx.fillStyle = padColor;
       ctx.beginPath();
       ctx.arc(h.x, h.y, 4, 0, Math.PI * 2);
       ctx.fill();
@@ -450,7 +759,7 @@ export class GameRenderer {
 
   // --- NANOVALEN (Boss) Drawing (Faithful to Image 2) ---
 
-  public drawBoss(boss: Boss, time: number) {
+  public drawBoss(boss: Boss, time: number, playerX?: number, playerY?: number) {
     const ctx = this.ctx;
     ctx.save();
     ctx.translate(boss.x, boss.y + boss.floatOffset);
@@ -568,17 +877,16 @@ export class GameRenderer {
 
     ctx.restore();
 
-    // --- Nanovalen Energy Shield (Absorbs Catvalen's shots) ---
-    // "crear escudos de energia que absorban los disparos del gato"
+    // --- Nanovalen Energy Shield (Red Absorbent Shield) ---
+    // Prompt: "el escudo de nanovalen debe ser rojo"
     if (boss.shieldActive) {
       ctx.save();
       const shieldW = bw * 1.5;
-      const shieldH = bh * 1.6;
 
-      ctx.shadowColor = '#818cf8';
-      ctx.shadowBlur = 25;
-      ctx.strokeStyle = '#6366f1';
-      ctx.lineWidth = 4;
+      ctx.shadowColor = '#ef4444';
+      ctx.shadowBlur = 28;
+      ctx.strokeStyle = '#dc2626';
+      ctx.lineWidth = 4.5;
 
       // Hexagonal energy barrier in front of Nanovalen
       ctx.beginPath();
@@ -593,25 +901,134 @@ export class GameRenderer {
       ctx.closePath();
 
       const shieldGrad = ctx.createRadialGradient(0, 0, 20, 0, 0, sRadius);
-      shieldGrad.addColorStop(0, 'rgba(99, 102, 241, 0.15)');
-      shieldGrad.addColorStop(0.8, 'rgba(129, 140, 248, 0.35)');
-      shieldGrad.addColorStop(1, 'rgba(168, 85, 247, 0.7)');
+      shieldGrad.addColorStop(0, 'rgba(239, 68, 68, 0.2)');
+      shieldGrad.addColorStop(0.7, 'rgba(220, 38, 38, 0.45)');
+      shieldGrad.addColorStop(1, 'rgba(244, 63, 94, 0.85)');
       ctx.fillStyle = shieldGrad;
       ctx.fill();
       ctx.stroke();
 
       // Shield label
-      ctx.fillStyle = '#ffffff';
+      ctx.fillStyle = '#ff6b81';
       ctx.font = 'bold 12px Orbitron, sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText('ESCUDO ABSORBENTE', 0, -sRadius - 8);
+      ctx.fillText('ESCUDO ROJO ABSORBENTE', 0, -sRadius - 8);
 
+      ctx.restore();
+    }
+
+    // --- Nanovalen Floating Circular Hands ---
+    // Prompt: "nanovalen debe ser capaz de golpear (al igual q el jugador) pero mas lento y con un cierto rango de acercamiento necesario"
+    if (boss.leftHand && boss.rightHand) {
+      const hands = [
+        { hand: boss.leftHand, defaultX: -halfW - 18, isLeft: true },
+        { hand: boss.rightHand, defaultX: halfW + 18, isLeft: false },
+      ];
+
+      hands.forEach(({ hand, defaultX, isLeft }) => {
+        ctx.save();
+        // Hand punches forward (to the left towards player)
+        const punchDist = hand.punchProgress * 55;
+        const hX = defaultX - punchDist;
+        const hY = 16 + Math.sin(time * 4 + (isLeft ? 0 : Math.PI)) * 3;
+
+        ctx.shadowColor = '#ef4444';
+        ctx.shadowBlur = hand.punchProgress > 0 ? 18 : 6;
+
+        // Circular dark robotic fist
+        ctx.fillStyle = '#1e293b';
+        ctx.strokeStyle = hand.punchProgress > 0 ? '#ef4444' : '#475569';
+        ctx.lineWidth = 3.5;
+        ctx.beginPath();
+        ctx.arc(hX, hY, 13, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+
+        // Inner glowing red core
+        ctx.fillStyle = hand.punchProgress > 0 ? '#ff003b' : '#dc2626';
+        ctx.beginPath();
+        ctx.arc(hX, hY, 5, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Gravity vortex rings if pulling
+        if (boss.currentAttack === 'gravity_pull' && !isLeft && boss.pullHandExtended && boss.pullHandExtended > 0) {
+          ctx.strokeStyle = 'rgba(239, 68, 68, 0.8)';
+          ctx.lineWidth = 2.5;
+          for (let r = 0; r < 3; r++) {
+            const vRadius = 18 + r * 14 + (time * 35) % 14;
+            ctx.beginPath();
+            ctx.arc(hX, hY, vRadius, 0, Math.PI * 2);
+            ctx.stroke();
+          }
+
+          ctx.fillStyle = 'rgba(244, 63, 94, 0.25)';
+          ctx.beginPath();
+          ctx.arc(hX, hY, 22, 0, Math.PI * 2);
+          ctx.fill();
+        }
+
+        ctx.restore();
+      });
+    }
+
+    // Broken Shield Shattered Indicator (from Gato Negro con Blanco)
+    if (boss.shieldDisabledTimer && boss.shieldDisabledTimer > 0) {
+      ctx.save();
+      ctx.strokeStyle = '#c084fc';
+      ctx.lineWidth = 2.5;
+      for (let i = 0; i < 6; i++) {
+        const sAng = (i * Math.PI * 2) / 6 + time * 3;
+        const rad = 50 + Math.sin(time * 12 + i) * 8;
+        ctx.beginPath();
+        ctx.moveTo(Math.cos(sAng) * rad, Math.sin(sAng) * rad);
+        ctx.lineTo(Math.cos(sAng) * (rad + 12), Math.sin(sAng) * (rad + 12));
+        ctx.stroke();
+      }
+      ctx.fillStyle = '#d946ef';
+      ctx.font = '900 11px Orbitron, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('⚡ ESCUDO ROTO ⚡', 0, -halfH - 24);
+      ctx.restore();
+    }
+
+    // Mind Control Puppet Effect (from Gato Negro con Blanco)
+    if (boss.mindControlTimer && boss.mindControlTimer > 0) {
+      ctx.save();
+      // Puppet strings reaching upwards
+      ctx.strokeStyle = '#d946ef';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([6, 4]);
+      ctx.lineDashOffset = -time * 20;
+      [-25, 0, 25].forEach(sx => {
+        ctx.beginPath();
+        ctx.moveTo(sx, -halfH);
+        ctx.lineTo(sx * 1.5, -this.height);
+        ctx.stroke();
+      });
+
+      // Swirling psychic crown over Nanovalen's head
+      ctx.strokeStyle = '#c084fc';
+      ctx.lineWidth = 3;
+      ctx.setLineDash([]);
+      ctx.beginPath();
+      ctx.ellipse(0, -halfH - 18, 28, 8, 0, 0, Math.PI * 2);
+      ctx.stroke();
+
+      ctx.fillStyle = '#f43f5e';
+      ctx.font = '900 12px Orbitron, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('🧠 CONTROL MENTAL', 0, -halfH - 32);
       ctx.restore();
     }
 
     ctx.restore();
 
     // --- Boss Attacks In Progress ---
+
+    // Gravity Pull Attack Visuals (suction vortex beam & warning)
+    if (boss.currentAttack === 'gravity_pull' && playerX !== undefined && playerY !== undefined) {
+      this.drawGravityPullAttack(boss, playerX, playerY, time);
+    }
 
     // 1) Laser Warning (1.5s telegraph warning) & Laser Fire
     // "lanzar lasers con un aviso previo de 1.5 segundo"
@@ -822,6 +1239,144 @@ export class GameRenderer {
     }
 
     ctx.restore();
+  }
+
+  // --- Gravity Pull Attack Drawing ---
+  private drawGravityPullAttack(boss: Boss, playerX: number, playerY: number, time: number) {
+    const ctx = this.ctx;
+    ctx.save();
+
+    const handX = boss.x - 70;
+    const handY = boss.y + 16 + boss.floatOffset;
+
+    // Warning banner at top
+    ctx.shadowColor = '#ef4444';
+    ctx.shadowBlur = 24;
+    ctx.fillStyle = '#ff1a4b';
+    ctx.font = '900 16px Orbitron, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('⚠️ ¡ATRACCIÓN GRAVITATORIA! ¡ACTIVA TU ESCUDO (SHIFT)! ⚠️', this.width / 2, 55);
+
+    // Gravitational suction cone from hand to player
+    const dist = Math.hypot(playerX - handX, playerY - handY);
+    const angle = Math.atan2(playerY - handY, playerX - handX);
+
+    // Glowing suction cone
+    const grad = ctx.createRadialGradient(handX, handY, 15, handX, handY, dist + 40);
+    grad.addColorStop(0, 'rgba(239, 68, 68, 0.55)');
+    grad.addColorStop(0.5, 'rgba(168, 85, 247, 0.25)');
+    grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    ctx.fillStyle = grad;
+
+    ctx.beginPath();
+    ctx.moveTo(handX, handY);
+    ctx.arc(handX, handY, dist + 40, angle - 0.45, angle + 0.45);
+    ctx.closePath();
+    ctx.fill();
+
+    // Suction spiral rings flowing towards Nanovalen's hand
+    ctx.strokeStyle = '#ef4444';
+    ctx.lineWidth = 2.5;
+    ctx.setLineDash([12, 10]);
+    ctx.lineDashOffset = time * 90;
+    for (let i = 1; i <= 5; i++) {
+      const stepDist = (dist * i) / 5;
+      const ringX = handX + Math.cos(angle) * stepDist;
+      const ringY = handY + Math.sin(angle) * stepDist;
+      ctx.beginPath();
+      ctx.ellipse(ringX, ringY, 16 + i * 8, 8 + i * 4, angle, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.setLineDash([]);
+
+    ctx.restore();
+  }
+
+  // --- Boss Combat Drones Drawing ---
+  // Prompt: "3 drones alrededor del mapa y que vayan disparando laseres en distintos patrones... tendran 300 HP"
+  public drawDrones(drones: BossDrone[], time: number) {
+    if (!drones || drones.length === 0) return;
+    const ctx = this.ctx;
+
+    drones.forEach(drone => {
+      ctx.save();
+      ctx.translate(drone.x, drone.y);
+
+      // Drone shadow/glow
+      ctx.shadowColor = '#ef4444';
+      ctx.shadowBlur = 18;
+
+      // Outer metallic chassis
+      ctx.fillStyle = '#1e293b';
+      ctx.strokeStyle = '#475569';
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.arc(0, 0, drone.size, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+
+      // 4 Micro-thrusters
+      [-drone.size - 2, drone.size + 2].forEach(tx => {
+        [-drone.size * 0.55, drone.size * 0.55].forEach(ty => {
+          ctx.fillStyle = '#334155';
+          ctx.beginPath();
+          ctx.arc(tx, ty, 5, 0, Math.PI * 2);
+          ctx.fill();
+
+          // Thruster flame glow
+          ctx.fillStyle = '#ef4444';
+          ctx.beginPath();
+          ctx.arc(tx, ty, 2.5 + Math.sin(time * 15 + tx) * 1.2, 0, Math.PI * 2);
+          ctx.fill();
+        });
+      });
+
+      // Rotating radar ring
+      ctx.strokeStyle = 'rgba(239, 68, 68, 0.5)';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(0, 0, drone.size * 0.72, 0, Math.PI * 2);
+      ctx.stroke();
+
+      // Central glowing red laser eye
+      const eyeGlow = 0.8 + 0.3 * Math.sin(time * 10);
+      ctx.fillStyle = '#ef4444';
+      ctx.beginPath();
+      ctx.arc(0, 0, 7 * eyeGlow, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Inner white core
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(0, 0, 3, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Pattern indicator badge
+      ctx.fillStyle = '#f87171';
+      ctx.font = 'bold 9px Orbitron, sans-serif';
+      ctx.textAlign = 'center';
+      const label = drone.pattern === 'sweep' ? 'SWEEP' : drone.pattern === 'pulse' ? 'PULSE' : 'TRACK';
+      ctx.fillText(label, 0, drone.size + 14);
+
+      // HP Bar (300 max HP)
+      const barW = 42;
+      const barH = 5;
+      const hpRatio = Math.max(0, drone.hp / drone.maxHp);
+      ctx.fillStyle = '#0f172a';
+      ctx.fillRect(-barW / 2, -drone.size - 14, barW, barH);
+      ctx.fillStyle = hpRatio > 0.5 ? '#22c55e' : hpRatio > 0.25 ? '#eab308' : '#ef4444';
+      ctx.fillRect(-barW / 2, -drone.size - 14, barW * hpRatio, barH);
+      ctx.strokeStyle = '#475569';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(-barW / 2, -drone.size - 14, barW, barH);
+
+      // HP text
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 9px Fredoka, sans-serif';
+      ctx.fillText(`${Math.ceil(drone.hp)} HP`, 0, -drone.size - 17);
+
+      ctx.restore();
+    });
   }
 
   // --- Obstacles Drawing (City Buildings, Meteorites, Asteroids) ---
@@ -1048,6 +1603,118 @@ export class GameRenderer {
         ctx.fill();
         ctx.stroke();
 
+      } else if (p.type === 'player_light_laser') {
+        // Láser Lumínico Amarillo (Gato Blanco con Manchas)
+        ctx.shadowColor = '#facc15';
+        ctx.shadowBlur = 24;
+
+        // Golden piercing ray
+        ctx.fillStyle = '#fef08a';
+        ctx.strokeStyle = '#eab308';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.ellipse(0, 0, p.radius * 2.2, p.radius * 0.6, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+
+        // White hot center
+        ctx.fillStyle = '#ffffff';
+        ctx.beginPath();
+        ctx.ellipse(0, 0, p.radius * 1.4, p.radius * 0.3, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+      } else if (p.type === 'player_magic_orb') {
+        // Bolas de poder mágico verde (Gata Azul con Manchas)
+        ctx.shadowColor = '#10b981';
+        ctx.shadowBlur = 20;
+
+        const orbGrad = ctx.createRadialGradient(0, 0, 2, 0, 0, p.radius);
+        orbGrad.addColorStop(0, '#ffffff');
+        orbGrad.addColorStop(0.4, '#6ee7b7');
+        orbGrad.addColorStop(0.8, '#10b981');
+        orbGrad.addColorStop(1, '#047857');
+        ctx.fillStyle = orbGrad;
+        ctx.beginPath();
+        ctx.arc(0, 0, p.radius, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Orbiting mystic petal sparks
+        ctx.fillStyle = '#a7f3d0';
+        for (let s = 0; s < 3; s++) {
+          const sang = time * 14 + (s * Math.PI * 2) / 3;
+          ctx.beginPath();
+          ctx.arc(Math.cos(sang) * (p.radius + 4), Math.sin(sang) * (p.radius + 4), 2.5, 0, Math.PI * 2);
+          ctx.fill();
+        }
+
+      } else if (p.type === 'player_energy_anvil') {
+        // Yunque de Energía Cósmica (Perro Rubio)
+        ctx.shadowColor = '#facc15';
+        ctx.shadowBlur = 28;
+
+        // Anvil Shape
+        ctx.fillStyle = '#facc15';
+        ctx.strokeStyle = '#ca8a04';
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        // Top flat head of anvil
+        ctx.moveTo(-28, -18);
+        ctx.lineTo(28, -18);
+        ctx.lineTo(24, -4);
+        ctx.lineTo(10, 4);
+        ctx.lineTo(18, 20);
+        ctx.lineTo(-18, 20);
+        ctx.lineTo(-10, 4);
+        ctx.lineTo(-24, -4);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+
+        // Anvil horn point
+        ctx.beginPath();
+        ctx.moveTo(28, -18);
+        ctx.lineTo(44, -14);
+        ctx.lineTo(24, -4);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+
+        // Energy circuit lines
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(-16, -10);
+        ctx.lineTo(16, -10);
+        ctx.stroke();
+
+      } else if (p.type === 'player_energy_blade') {
+        // Espadas de Luz Construida (Perro Rubio)
+        ctx.shadowColor = '#f59e0b';
+        ctx.shadowBlur = 18;
+
+        ctx.fillStyle = '#fef3c7';
+        ctx.strokeStyle = '#d97706';
+        ctx.lineWidth = 2.5;
+
+        // Pointy floating sword pointing forward (along motion)
+        const angle = Math.atan2(p.vy, p.vx);
+        ctx.rotate(angle);
+
+        ctx.beginPath();
+        ctx.moveTo(18, 0); // Tip
+        ctx.lineTo(6, -6);
+        ctx.lineTo(-14, -4);
+        ctx.lineTo(-14, 4);
+        ctx.lineTo(6, 6);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+
+        // Sword hilt
+        ctx.fillStyle = '#b45309';
+        ctx.fillRect(-18, -8, 4, 16);
+        ctx.fillRect(-22, -2, 4, 4);
+
       } else if (p.type === 'boss_meteor') {
         // Nanovalen meteor thrown at player
         ctx.shadowColor = '#dc2626';
@@ -1066,6 +1733,30 @@ export class GameRenderer {
         ctx.fillStyle = '#fca5a5';
         ctx.beginPath();
         ctx.arc(-p.radius * 0.3, -p.radius * 0.2, p.radius * 0.35, 0, Math.PI * 2);
+        ctx.fill();
+
+      } else if (p.type === 'boss_drone_laser' || p.type === 'boss_pulse_laser') {
+        // Red combat drone laser
+        ctx.shadowColor = '#ef4444';
+        ctx.shadowBlur = 18;
+
+        const angle = Math.atan2(p.vy, p.vx);
+        ctx.rotate(angle);
+
+        ctx.fillStyle = '#ffffff';
+        ctx.strokeStyle = '#ef4444';
+        ctx.lineWidth = 2.5;
+
+        // Sleek laser bolt
+        ctx.beginPath();
+        ctx.roundRect(-p.radius * 1.6, -p.radius * 0.45, p.radius * 3.2, p.radius * 0.9, p.radius * 0.4);
+        ctx.fill();
+        ctx.stroke();
+
+        // Crimson halo
+        ctx.fillStyle = 'rgba(239, 68, 68, 0.4)';
+        ctx.beginPath();
+        ctx.arc(0, 0, p.radius * 1.4, 0, Math.PI * 2);
         ctx.fill();
       }
 
@@ -1480,5 +2171,68 @@ export class GameRenderer {
 
       ctx.restore();
     });
+  }
+
+  // --- TIME STOP (DETENER EL TIEMPO) CINEMATIC OVERLAY ---
+  public drawTimeStopOverlay(timer: number, maxTimer: number, time: number) {
+    const ctx = this.ctx;
+    ctx.save();
+
+    // 1. Chromatic sepia / negative temporal vignette
+    const grad = ctx.createRadialGradient(
+      this.width / 2,
+      this.height / 2,
+      100,
+      this.width / 2,
+      this.height / 2,
+      this.width * 0.75
+    );
+    grad.addColorStop(0, 'rgba(217, 119, 6, 0.08)');
+    grad.addColorStop(0.6, 'rgba(120, 53, 15, 0.25)');
+    grad.addColorStop(1, 'rgba(15, 23, 42, 0.65)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, this.width, this.height);
+
+    // 2. Giant Chrono Clock in Center background
+    ctx.save();
+    ctx.translate(this.width / 2, this.height / 2);
+    const clockR = 140;
+
+    ctx.strokeStyle = 'rgba(251, 191, 36, 0.25)';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(0, 0, clockR, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // Clock hour marks & Roman numerals
+    for (let i = 0; i < 12; i++) {
+      const a = (i * Math.PI * 2) / 12;
+      ctx.beginPath();
+      ctx.moveTo(Math.cos(a) * (clockR - 12), Math.sin(a) * (clockR - 12));
+      ctx.lineTo(Math.cos(a) * clockR, Math.sin(a) * clockR);
+      ctx.strokeStyle = 'rgba(251, 191, 36, 0.4)';
+      ctx.lineWidth = i % 3 === 0 ? 3 : 1.5;
+      ctx.stroke();
+    }
+
+    // Frozen second / minute hands
+    ctx.strokeStyle = 'rgba(253, 230, 138, 0.6)';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(Math.cos(-time * 0.1) * (clockR * 0.7), Math.sin(-time * 0.1) * (clockR * 0.7));
+    ctx.stroke();
+
+    ctx.restore();
+
+    // 3. Floating Time Freeze Banner at Top
+    ctx.fillStyle = 'rgba(245, 158, 11, 0.9)';
+    ctx.font = '900 16px Orbitron, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.shadowColor = '#d97706';
+    ctx.shadowBlur = 14;
+    ctx.fillText(`⏳ TIEMPO DETENIDO: ${timer.toFixed(1)}s`, this.width / 2, 42);
+
+    ctx.restore();
   }
 }

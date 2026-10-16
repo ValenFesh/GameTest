@@ -8,6 +8,7 @@ interface VictoryModalProps {
   onPlayAgain: () => void;
   onRematchBoss: () => void;
   onMainMenu?: () => void;
+  onNextLevel?: () => void;
 }
 
 export const VictoryModal: React.FC<VictoryModalProps> = ({
@@ -15,6 +16,7 @@ export const VictoryModal: React.FC<VictoryModalProps> = ({
   onPlayAgain,
   onRematchBoss,
   onMainMenu,
+  onNextLevel,
 }) => {
   useEffect(() => {
     // Launch fireworks confetti
@@ -113,7 +115,7 @@ export const VictoryModal: React.FC<VictoryModalProps> = ({
         </div>
 
         {/* Total Score Banner */}
-        <div className="bg-neutral-950/70 border border-neutral-800 rounded-2xl p-3 mb-6 flex items-center justify-between">
+        <div className="bg-neutral-950/70 border border-neutral-800 rounded-2xl p-3 mb-4 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Trophy className="w-5 h-5 text-amber-400" />
             <span className="text-xs text-neutral-300 font-bold">PUNTUACIÓN FINAL</span>
@@ -123,8 +125,37 @@ export const VictoryModal: React.FC<VictoryModalProps> = ({
           </span>
         </div>
 
+        {/* Nanovalen Wins & Skin Unlock Alert */}
+        <div className="mb-5 space-y-2">
+          {stats.nanovalenWins !== undefined && (
+            <div className="bg-amber-500/10 border border-amber-500/40 rounded-xl p-2.5 flex items-center justify-center gap-2 text-xs font-bold text-amber-300">
+              <Trophy className="w-4 h-4 text-amber-400 shrink-0" />
+              <span>
+                🏆 Victorias acumuladas contra Nanovalen:{' '}
+                <strong className="text-amber-200 text-sm font-extrabold">{stats.nanovalenWins}</strong>
+              </span>
+            </div>
+          )}
+
+          {stats.unlockedSkinNotice && (
+            <div className="bg-emerald-950/80 border-2 border-emerald-400 rounded-xl p-3 text-xs text-emerald-200 font-extrabold shadow-lg shadow-emerald-500/20 animate-pulse flex items-center justify-center gap-2">
+              <span className="text-base">🎉</span>
+              <span>¡NUEVO PERSONAJE DESBLOQUEADO: {stats.unlockedSkinNotice.toUpperCase()}!</span>
+            </div>
+          )}
+        </div>
+
         {/* Action Buttons */}
         <div className="flex flex-col gap-2.5 justify-center">
+          {/* Primary Siguiente Nivel Button */}
+          <button
+            onClick={onNextLevel ? onNextLevel : () => {}}
+            className="w-full flex items-center justify-center gap-2.5 py-3.5 px-6 rounded-2xl bg-gradient-to-r from-cyan-500 via-sky-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-black font-display text-sm tracking-wider shadow-xl shadow-cyan-500/25 transition-transform active:scale-95 cursor-pointer"
+          >
+            <Sparkles className="w-4 h-4 text-cyan-200 animate-spin" />
+            <span>Siguiente Nivel ➔</span>
+          </button>
+
           <div className="flex flex-col sm:flex-row gap-3">
             <button
               onClick={onPlayAgain}
