@@ -5,7 +5,7 @@ import { soundManager } from '../audio/soundManager';
 
 interface GameOverModalProps {
   stage: GameStage;
-  deathReason?: 'standard' | 'gamma_ray';
+  deathReason?: 'standard' | 'gamma_ray' | 'santiscat_oneshot' | 'black_hole' | 'reality_tear';
   bossBlackFlashesCount?: number;
   onRetry: () => void;
   onMainMenu: () => void;
@@ -19,6 +19,8 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({
   onMainMenu,
 }) => {
   const isGammaExtinction = deathReason === 'gamma_ray';
+  const isSantiscatOneShot = deathReason === 'santiscat_oneshot';
+  const isBlackHoleDeath = deathReason === 'black_hole';
 
   // Ensure gamma sound stops immediately when game over is mounted
   useEffect(() => {
@@ -53,12 +55,24 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({
         </div>
 
         <h2 className="text-2xl md:text-3xl font-black font-display text-red-500 mb-1">
-          {isGammaExtinction ? 'EXTINCIÓN PLANETARIA' : 'FIN DE LA PARTIDA'}
+          {isGammaExtinction
+            ? 'EXTINCIÓN PLANETARIA'
+            : isSantiscatOneShot
+            ? '¡DESINTEGRACIÓN ONE-SHOT!'
+            : isBlackHoleDeath
+            ? '¡ABSORBIDO POR EL AGUJERO NEGRO!'
+            : 'FIN DE LA PARTIDA'}
         </h2>
 
         <p className="text-neutral-300 text-xs md:text-sm mb-4 font-game">
           {isGammaExtinction
             ? 'El estallido de rayos gamma de Nanovalen aniquiló a Catvalen y pulverizó la Tierra.'
+            : isSantiscatOneShot
+            ? 'La bola de fuego singular de Santiscat es 1-Shot letal al contacto directo.'
+            : isBlackHoleDeath
+            ? 'El horizonte de sucesos del agujero negro distorsionó y devoró la materia de Catvalen.'
+            : stage === 'santiscat_boss'
+            ? 'Santiscat manipuló el tejido de la realidad hasta quebrar tu defensa.'
             : stage === 'boss'
             ? 'Nanovalen fue implacable con sus ataques mejorados. ¡Aprende sus patrones de combate!'
             : 'Los obstáculos derribaron a Catvalen. ¡Inténtalo de nuevo!'}
@@ -77,13 +91,21 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({
           <Shield className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
           <div>
             <span className="font-bold text-emerald-400">Consejo de Supervivencia:</span>{' '}
-            {isGammaExtinction ? (
+            {isSantiscatOneShot ? (
+              <span>
+                ¡La bola de fuego de Santiscat es pequeña pero <strong>mata al instante (1-Shot)</strong>! Activa tu <strong>Escudo</strong> [Shift/C] para neutralizarla o mantente a máxima distancia para esquivarla.
+              </span>
+            ) : isBlackHoleDeath ? (
+              <span>
+                El <strong>Agujero Negro</strong> absorbe meteoritos y escombros que rotan en su disco de acreción. ¡Huye a toda velocidad para no quedar atrapado en su campo gravitatorio!
+              </span>
+            ) : isGammaExtinction ? (
               <span>
                 ¡El estallido gamma es <strong>triple de potente</strong> y <strong>no se puede cancelar</strong>! Cuando Nanovalen lo active, maniobra de inmediato hacia el <strong>arco de seguridad verde</strong> para sobrevivir.
               </span>
             ) : (
               <span>
-                Todos tus ataques tienen <strong>cooldown</strong>; administra bien tus bolas de fuego y rayos. Esquiva el láser de Nanovalen observando el <strong>aviso rojo de 1.5s</strong> o usa tu <strong>Escudo Verde</strong>.
+                Todos tus ataques tienen <strong>cooldown</strong>; administra bien tus bolas de fuego y rayos. Esquiva los ataques o usa tu <strong>Escudo</strong> con anticipación.
               </span>
             )}
           </div>

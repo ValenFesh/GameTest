@@ -98,6 +98,13 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
     }
   };
 
+  const handleInstaKillSantiscat = () => {
+    if (engine) {
+      engine.instaKillSantiscat();
+      showToast('💀 ¡Santiscat derrotado de un solo golpe!');
+    }
+  };
+
   const handleJump = (stage: GameStage) => {
     if (onJumpStage) {
       onJumpStage(stage);
@@ -447,7 +454,29 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                   onClick={handleInstaKillBoss}
                   className="px-4 py-2 rounded-xl bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 text-white font-black text-xs transition-all shadow-md active:scale-95 cursor-pointer"
                 >
-                  💥 1-SHOT BOSS
+                  💥 1-SHOT NANOVALEN
+                </button>
+              </div>
+
+              {/* Instant Santiscat Defeat */}
+              <div className="p-3.5 bg-neutral-950/80 border border-purple-500/40 rounded-2xl flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-purple-500/15 border border-purple-500/50 flex items-center justify-center text-purple-400">
+                    <Skull className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <div className="text-xs font-black text-white">ELIMINAR A SANTISCAT (1-SHOT NIVEL 4)</div>
+                    <div className="text-[11px] text-neutral-400">
+                      Causa 99,999 de daño a Santiscat para probar la victoria del Nivel 4 cósmico.
+                    </div>
+                  </div>
+                </div>
+
+                <button
+                  onClick={handleInstaKillSantiscat}
+                  className="px-4 py-2 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-black text-xs transition-all shadow-md active:scale-95 cursor-pointer"
+                >
+                  🐱 1-SHOT SANTISCAT
                 </button>
               </div>
             </div>
@@ -485,7 +514,22 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                   {
                     id: 'boss' as GameStage,
                     title: '👾 Batalla Boss: Nanovalen',
-                    desc: 'Enfrentamiento directo contra el jefe final.',
+                    desc: 'Enfrentamiento directo contra el robot gato Nanovalen.',
+                  },
+                  {
+                    id: 'distorted' as GameStage,
+                    title: '🌀 Nivel 4: Realidad Distorsionada',
+                    desc: 'Navegación libre por mapa gigante (3200x2400) con anomalías y altar.',
+                  },
+                  {
+                    id: 'rhythm_summon' as GameStage,
+                    title: '🎵 Nivel 4: Invocación de Ritmo',
+                    desc: 'Minijuego de beat al ritmo de 128 BPM para convocar a Santiscat.',
+                  },
+                  {
+                    id: 'santiscat_boss' as GameStage,
+                    title: '🐱 Nivel 4: Boss Santiscat',
+                    desc: 'Batalla cósmica con Sol, Agujero Negro, Shaders y fuego 1-Shot.',
                   },
                 ].map((s) => (
                   <button

@@ -1,4 +1,16 @@
-export type GameStage = 'start' | 'city' | 'transition' | 'space' | 'boss_intro' | 'boss' | 'victory' | 'gameover' | 'cinematic_earth_destruction';
+export type GameStage =
+  | 'start'
+  | 'city'
+  | 'transition'
+  | 'space'
+  | 'boss_intro'
+  | 'boss'
+  | 'victory'
+  | 'gameover'
+  | 'cinematic_earth_destruction'
+  | 'distorted'
+  | 'rhythm_summon'
+  | 'santiscat_boss';
 
 export type CharacterSkinId =
   | 'catvalen'
@@ -104,7 +116,10 @@ export interface Projectile {
     | 'boss_meteor'
     | 'boss_energy'
     | 'boss_drone_laser'
-    | 'boss_pulse_laser';
+    | 'boss_pulse_laser'
+    | 'santiscat_sun_shot'
+    | 'santiscat_oneshot_fireball'
+    | 'santiscat_debris';
   x: number;
   y: number;
   vx: number;
@@ -125,7 +140,7 @@ export interface Projectile {
 
 export interface Obstacle {
   id: string;
-  type: 'building' | 'meteorite' | 'asteroid';
+  type: 'building' | 'meteorite' | 'asteroid' | 'glitch_shard' | 'corrupted_meteor';
   x: number;
   y: number;
   width: number;
@@ -254,12 +269,14 @@ export interface GameStats {
   buildingsDestroyed: number;
   asteroidsDestroyed: number;
   nanovalenDamageDealt: number;
+  santiscatDamageDealt?: number;
   blackFlashesCount: number;
   bossBlackFlashesCount: number;
   totalAttacksLanded: number;
   timeElapsed: number; // seconds
-  deathReason?: 'standard' | 'gamma_ray';
+  deathReason?: 'standard' | 'gamma_ray' | 'santiscat_oneshot' | 'black_hole' | 'reality_tear';
   nanovalenWins?: number;
+  santiscatWins?: number;
   unlockedSkinNotice?: string;
 }
 
@@ -269,5 +286,114 @@ export interface CinematicState {
   phase: 'incoming_burst' | 'impact_earth' | 'continents_melt' | 'shattering_explosion' | 'extinction';
   earthHealth: number; // 1.0 to 0.0
   flashAlpha: number;
+}
+
+export interface Camera {
+  x: number;
+  y: number;
+  viewportWidth: number;
+  viewportHeight: number;
+  worldWidth: number;
+  worldHeight: number;
+}
+
+export interface RealityGlitch {
+  id: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  type: 'fault_line' | 'chromatic_vortex' | 'quantum_tear';
+  pulseTimer: number;
+  damage: number;
+  angle: number;
+}
+
+export interface BlackHoleState {
+  active: boolean;
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  radius: number; // event horizon
+  phase: 'sun_charging' | 'compressing' | 'black_hole_active' | 'collapsing_explosion';
+  sunShotsFired: number;
+  sunShotTimer: number;
+  timer: number;
+  maxDuration: number;
+  absorbedDebris: { id: string; angle: number; dist: number; speed: number; radius: number; color: string }[];
+  gravityRadius: number;
+}
+
+export interface RealitySlash {
+  id: string;
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  phase: 'telegraph' | 'slash' | 'fade';
+  timer: number;
+  maxTimer: number;
+  width: number;
+  damage: number;
+  hasHit?: boolean;
+}
+
+export interface RhythmBeat {
+  id: string;
+  targetTime: number; // in seconds relative to minigame start
+  hit: boolean;
+  missed: boolean;
+  rating?: 'perfect' | 'great' | 'miss';
+}
+
+export interface RhythmGameState {
+  active: boolean;
+  timer: number;
+  duration: number; // seconds (e.g. 11s)
+  bpm: number; // e.g. 130
+  beats: RhythmBeat[];
+  score: number;
+  combo: number;
+  maxCombo: number;
+  requiredHits: number;
+  totalHits: number;
+  completed: boolean;
+  failed: boolean;
+  altarX: number;
+  altarY: number;
+}
+
+export type SantiscatAttack =
+  | 'idle'
+  | 'sun_burst'
+  | 'compress_black_hole'
+  | 'black_hole_chase'
+  | 'oneshot_fireball'
+  | 'reality_slashes'
+  | 'dimensional_warp';
+
+export interface SantiscatBoss {
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  width: number;
+  height: number;
+  hp: number;
+  maxHp: number; // 4800 HP
+  shieldActive: boolean;
+  shieldTimer: number;
+  currentAttack: SantiscatAttack;
+  attackTimer: number;
+  attackCooldown: number;
+  floatOffset: number;
+  blackHole: BlackHoleState;
+  slashes: RealitySlash[];
+  leftHand: { x: number; y: number; progress: number };
+  rightHand: { x: number; y: number; progress: number };
+  eyeState: 'happy' | 'menacing' | 'glowing';
+  facing: 1 | -1;
+  summonExplosionTimer?: number;
 }
 

@@ -2,6 +2,7 @@ import {
   BlackFlashStrike,
   Boss,
   BossDrone,
+  Camera,
   CinematicState,
   DamageNumber,
   GameStage,
@@ -9,6 +10,9 @@ import {
   Particle,
   Player,
   Projectile,
+  RealityGlitch,
+  RhythmGameState,
+  SantiscatBoss,
 } from '../types/game';
 
 export class GameRenderer {
@@ -17,12 +21,18 @@ export class GameRenderer {
   private height: number;
   private stars: { x: number; y: number; size: number; speed: number; alpha: number }[] = [];
   private cityBuildings: { x: number; width: number; height: number; color: string; windows: boolean[][] }[] = [];
+  private santiscatImg: HTMLImageElement | null = null;
 
   constructor(ctx: CanvasRenderingContext2D, width: number, height: number) {
     this.ctx = ctx;
     this.width = width;
     this.height = height;
     this.initBackgrounds();
+
+    if (typeof Image !== 'undefined') {
+      this.santiscatImg = new Image();
+      this.santiscatImg.src = '/assets/aistudio/santiscat_18f093e7.png';
+    }
   }
 
   public resize(width: number, height: number) {
@@ -177,6 +187,8 @@ export class GameRenderer {
       }
       ctx.restore();
 
+    } else if (stage === 'distorted' || stage === 'rhythm_summon' || stage === 'santiscat_boss') {
+      this.drawDistortedBackground(gameTime);
     } else {
       // Space / Boss stage: Deep cosmos nebula
       const spaceGrad = ctx.createRadialGradient(
@@ -1758,6 +1770,65 @@ export class GameRenderer {
         ctx.beginPath();
         ctx.arc(0, 0, p.radius * 1.4, 0, Math.PI * 2);
         ctx.fill();
+
+      } else if (p.type === 'santiscat_sun_shot') {
+        // Celestial Sun plasma blast
+        ctx.shadowColor = '#facc15';
+        ctx.shadowBlur = 22;
+
+        const sunGrad = ctx.createRadialGradient(0, 0, 2, 0, 0, p.radius);
+        sunGrad.addColorStop(0, '#ffffff');
+        sunGrad.addColorStop(0.4, '#fde047');
+        sunGrad.addColorStop(0.8, '#ea580c');
+        sunGrad.addColorStop(1, '#ef4444');
+        ctx.fillStyle = sunGrad;
+        ctx.beginPath();
+        ctx.arc(0, 0, p.radius, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+
+      } else if (p.type === 'santiscat_oneshot_fireball') {
+        // Tiny ONE-SHOT Fireball: lethal, dense, high-frequency sinister glow
+        ctx.shadowColor = '#ff003b';
+        ctx.shadowBlur = 28;
+
+        // Outer dark fire aura
+        ctx.fillStyle = '#ff003b';
+        ctx.beginPath();
+        ctx.arc(0, 0, p.radius * 1.6, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Inner pitch-black singular core
+        ctx.fillStyle = '#000000';
+        ctx.beginPath();
+        ctx.arc(0, 0, p.radius * 0.9, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Hot pinpoint white center
+        ctx.fillStyle = '#ffffff';
+        ctx.beginPath();
+        ctx.arc(0, 0, p.radius * 0.35, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Subtle skull / danger pulse symbol
+        ctx.strokeStyle = '#ff0055';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(0, 0, p.radius * 2.2, time * 12, time * 12 + Math.PI);
+        ctx.stroke();
+
+      } else if (p.type === 'santiscat_debris') {
+        // Orbiting debris
+        ctx.fillStyle = '#64748b';
+        ctx.strokeStyle = '#a855f7';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(0, 0, p.radius, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
       }
 
       ctx.restore();
@@ -2232,6 +2303,553 @@ export class GameRenderer {
     ctx.shadowColor = '#d97706';
     ctx.shadowBlur = 14;
     ctx.fillText(`⏳ TIEMPO DETENIDO: ${timer.toFixed(1)}s`, this.width / 2, 42);
+
+    ctx.restore();
+  }
+
+  // =========================================================================
+  // LEVEL 4 RENDERING: DISTORTED REALITY, RHYTHM ALTAR & SANTISCAT BOSS
+  // =========================================================================
+
+  public drawDistortedBackground(gameTime: number) {
+    const ctx = this.ctx;
+
+    // Deep twisted cosmos void gradient
+    const bgGrad = ctx.createRadialGradient(
+      this.width * 0.5, this.height * 0.5, 40,
+      this.width * 0.5, this.height * 0.5, Math.max(this.width, this.height) * 0.85
+    );
+    bgGrad.addColorStop(0, '#150826');
+    bgGrad.addColorStop(0.35, '#0d061c');
+    bgGrad.addColorStop(0.7, '#070210');
+    bgGrad.addColorStop(1, '#020005');
+    ctx.fillStyle = bgGrad;
+    ctx.fillRect(0, 0, this.width, this.height);
+
+    // Chromatic nebula waves
+    ctx.save();
+    for (let i = 0; i < 4; i++) {
+      const nx = this.width * (0.2 + i * 0.22) + Math.sin(gameTime * 0.4 + i) * 60;
+      const ny = this.height * (0.3 + (i % 2) * 0.35) + Math.cos(gameTime * 0.5 + i) * 50;
+      const nGrad = ctx.createRadialGradient(nx, ny, 10, nx, ny, 320);
+      const isCyan = i % 2 === 0;
+      nGrad.addColorStop(0, isCyan ? 'rgba(6, 182, 212, 0.14)' : 'rgba(217, 70, 239, 0.14)');
+      nGrad.addColorStop(0.6, isCyan ? 'rgba(14, 116, 144, 0.05)' : 'rgba(134, 25, 143, 0.05)');
+      nGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+      ctx.fillStyle = nGrad;
+      ctx.fillRect(0, 0, this.width, this.height);
+    }
+
+    // Warped Spacetime Grid lines
+    ctx.strokeStyle = 'rgba(168, 85, 247, 0.12)';
+    ctx.lineWidth = 1.2;
+    const gridSize = 140;
+    const wave = Math.sin(gameTime * 1.5) * 8;
+
+    for (let x = 0; x <= this.width; x += gridSize) {
+      ctx.beginPath();
+      for (let y = 0; y <= this.height; y += 20) {
+        const xOffset = Math.sin((y + gameTime * 50) * 0.015) * wave;
+        if (y === 0) ctx.moveTo(x + xOffset, y);
+        else ctx.lineTo(x + xOffset, y);
+      }
+      ctx.stroke();
+    }
+
+    for (let y = 0; y <= this.height; y += gridSize) {
+      ctx.beginPath();
+      for (let x = 0; x <= this.width; x += 20) {
+        const yOffset = Math.cos((x + gameTime * 50) * 0.015) * wave;
+        if (x === 0) ctx.moveTo(x, y + yOffset);
+        else ctx.lineTo(x, y + yOffset);
+      }
+      ctx.stroke();
+    }
+
+    // Ambient twinkling distorted stars
+    this.stars.forEach(s => {
+      const flicker = 0.5 + 0.5 * Math.sin(gameTime * 4 + s.x * 0.1);
+      ctx.fillStyle = s.x % 2 === 0 ? `rgba(56, 189, 248, ${s.alpha * flicker})` : `rgba(244, 114, 182, ${s.alpha * flicker})`;
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, s.size * 1.1, 0, Math.PI * 2);
+      ctx.fill();
+    });
+
+    ctx.restore();
+  }
+
+  public drawRealityGlitches(glitches: RealityGlitch[], gameTime: number) {
+    const ctx = this.ctx;
+    ctx.save();
+
+    glitches.forEach(g => {
+      ctx.save();
+      ctx.translate(g.x, g.y);
+      ctx.rotate(g.angle);
+
+      const pulse = 0.7 + 0.3 * Math.sin(g.pulseTimer);
+
+      if (g.type === 'fault_line') {
+        // Jagged reality fracture with RGB chromatic split
+        ctx.strokeStyle = `rgba(236, 72, 153, ${0.85 * pulse})`;
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        const halfW = g.width / 2;
+        ctx.moveTo(-halfW, 0);
+        ctx.lineTo(-halfW * 0.5, -8);
+        ctx.lineTo(0, 10);
+        ctx.lineTo(halfW * 0.5, -6);
+        ctx.lineTo(halfW, 0);
+        ctx.stroke();
+
+        ctx.strokeStyle = `rgba(6, 182, 212, ${0.85 * pulse})`;
+        ctx.lineWidth = 2.5;
+        ctx.beginPath();
+        ctx.moveTo(-halfW + 3, 2);
+        ctx.lineTo(-halfW * 0.5 + 3, -6);
+        ctx.lineTo(3, 12);
+        ctx.lineTo(halfW * 0.5 + 3, -4);
+        ctx.lineTo(halfW + 3, 2);
+        ctx.stroke();
+
+      } else if (g.type === 'chromatic_vortex') {
+        // Swirling mini-vortex
+        const r = g.width * 0.35 * pulse;
+        const grad = ctx.createRadialGradient(0, 0, 4, 0, 0, r);
+        grad.addColorStop(0, '#000000');
+        grad.addColorStop(0.5, 'rgba(168, 85, 247, 0.6)');
+        grad.addColorStop(1, 'rgba(6, 182, 212, 0)');
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.arc(0, 0, r, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.strokeStyle = '#c084fc';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(0, 0, r * 0.75, gameTime * 4, gameTime * 4 + Math.PI * 1.3);
+        ctx.stroke();
+
+      } else {
+        // Quantum Tear: fractured crystal shards
+        ctx.fillStyle = `rgba(147, 51, 234, ${0.4 * pulse})`;
+        ctx.strokeStyle = '#a855f7';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(-20, -15);
+        ctx.lineTo(15, -25);
+        ctx.lineTo(25, 10);
+        ctx.lineTo(-10, 20);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+      }
+
+      ctx.restore();
+    });
+
+    ctx.restore();
+  }
+
+  public drawSpacetimeAltar(altarX: number, altarY: number, gameTime: number, playerDist: number) {
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.translate(altarX, altarY);
+
+    // Glowing base aura
+    const baseGrad = ctx.createRadialGradient(0, 0, 30, 0, 0, 240);
+    baseGrad.addColorStop(0, 'rgba(168, 85, 247, 0.45)');
+    baseGrad.addColorStop(0.5, 'rgba(56, 189, 248, 0.2)');
+    baseGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    ctx.fillStyle = baseGrad;
+    ctx.beginPath();
+    ctx.arc(0, 0, 240, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Outer Obsidian Platform with Runes
+    ctx.fillStyle = '#17122a';
+    ctx.strokeStyle = '#c084fc';
+    ctx.lineWidth = 5;
+    ctx.beginPath();
+    ctx.arc(0, 0, 95, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+
+    // Rotating Runic Rings
+    ctx.save();
+    ctx.rotate(gameTime * 0.6);
+    ctx.strokeStyle = 'rgba(56, 189, 248, 0.7)';
+    ctx.lineWidth = 3;
+    ctx.setLineDash([14, 8, 4, 8]);
+    ctx.beginPath();
+    ctx.arc(0, 0, 78, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+
+    ctx.save();
+    ctx.rotate(-gameTime * 0.8);
+    ctx.strokeStyle = 'rgba(236, 72, 153, 0.7)';
+    ctx.lineWidth = 2.5;
+    ctx.setLineDash([8, 6, 2, 6]);
+    ctx.beginPath();
+    ctx.arc(0, 0, 58, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+
+    // Central Cosmic Core Crystal
+    const corePulse = 1.0 + 0.15 * Math.sin(gameTime * 5);
+    const coreGrad = ctx.createRadialGradient(0, 0, 2, 0, 0, 28 * corePulse);
+    coreGrad.addColorStop(0, '#ffffff');
+    coreGrad.addColorStop(0.3, '#38bdf8');
+    coreGrad.addColorStop(0.7, '#a855f7');
+    coreGrad.addColorStop(1, 'rgba(168, 85, 247, 0)');
+    ctx.fillStyle = coreGrad;
+    ctx.beginPath();
+    ctx.arc(0, 0, 28 * corePulse, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Vertical Light Pillar shooting to the heavens
+    const beamGrad = ctx.createLinearGradient(-15, 0, 15, 0);
+    beamGrad.addColorStop(0, 'rgba(56, 189, 248, 0)');
+    beamGrad.addColorStop(0.5, 'rgba(255, 255, 255, 0.45)');
+    beamGrad.addColorStop(1, 'rgba(56, 189, 248, 0)');
+    ctx.fillStyle = beamGrad;
+    ctx.fillRect(-18, -400, 36, 400);
+
+    // Interactive Callout if player is near
+    if (playerDist < 160) {
+      ctx.fillStyle = 'rgba(15, 23, 42, 0.9)';
+      ctx.strokeStyle = '#38bdf8';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.roundRect(-120, -135, 240, 34, 12);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.fillStyle = '#f8fafc';
+      ctx.font = '900 12px Orbitron, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('⚡ PRESIONA [ESPACIO / E] ⚡', 0, -114);
+    }
+
+    ctx.restore();
+  }
+
+  public drawRhythmGameOverlay(rhythm: RhythmGameState, gameTime: number) {
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.translate(rhythm.altarX, rhythm.altarY);
+
+    // Central Target Circle (Radius 62)
+    const targetPulse = 1.0 + 0.08 * Math.sin(gameTime * 12);
+    ctx.strokeStyle = '#facc15';
+    ctx.lineWidth = 4;
+    ctx.shadowColor = '#facc15';
+    ctx.shadowBlur = 16;
+    ctx.beginPath();
+    ctx.arc(0, 0, 62 * targetPulse, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+
+    // Incoming Beat Rings collapsing toward the target circle
+    rhythm.beats.forEach(b => {
+      if (b.hit || b.missed) return;
+      const dt = b.targetTime - rhythm.timer;
+      if (dt > 0 && dt < 1.3) {
+        const ringRadius = 62 + dt * 170;
+        const alpha = Math.max(0.15, 1.0 - dt / 1.3);
+        ctx.strokeStyle = `rgba(56, 189, 248, ${alpha})`;
+        ctx.lineWidth = dt < 0.12 ? 4.5 : 2.5;
+        ctx.beginPath();
+        ctx.arc(0, 0, ringRadius, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+    });
+
+    // Score & Combo HUD floating in world space
+    ctx.fillStyle = '#38bdf8';
+    ctx.font = '900 20px Orbitron, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(`BEATS: ${rhythm.totalHits} / ${rhythm.requiredHits}`, 0, 115);
+
+    if (rhythm.combo > 1) {
+      ctx.fillStyle = '#facc15';
+      ctx.font = '900 16px Orbitron, sans-serif';
+      ctx.fillText(`COMBO x${rhythm.combo}!`, 0, 140);
+    }
+
+    ctx.restore();
+  }
+
+  public drawSantiscat(boss: SantiscatBoss, gameTime: number, playerX: number, playerY: number) {
+    const ctx = this.ctx;
+    ctx.save();
+    const catY = boss.y + boss.floatOffset;
+
+    // 1. Cosmic Deity Aura behind Santiscat
+    const auraPulse = 1.0 + 0.12 * Math.sin(gameTime * 3);
+    const auraGrad = ctx.createRadialGradient(boss.x, catY, 30, boss.x, catY, 140 * auraPulse);
+    auraGrad.addColorStop(0, 'rgba(168, 85, 247, 0.45)');
+    auraGrad.addColorStop(0.5, 'rgba(56, 189, 248, 0.25)');
+    auraGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    ctx.fillStyle = auraGrad;
+    ctx.beginPath();
+    ctx.arc(boss.x, catY, 140 * auraPulse, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 2. Santiscat Body Sprite (Using loaded asset /assets/aistudio/santiscat_18f093e7.png)
+    ctx.save();
+    ctx.translate(boss.x, catY);
+    if (boss.facing === -1) {
+      ctx.scale(-1, 1);
+    }
+
+    const drawW = boss.width;
+    const drawH = boss.height;
+
+    if (this.santiscatImg && this.santiscatImg.complete && this.santiscatImg.naturalWidth > 0) {
+      ctx.drawImage(this.santiscatImg, -drawW / 2, -drawH / 2, drawW, drawH);
+    } else {
+      // Fallback procedural square cat matching the doodle
+      ctx.fillStyle = '#9ca3af';
+      ctx.strokeStyle = '#000000';
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.roundRect(-drawW / 2, -drawH / 2, drawW, drawH, 12);
+      ctx.fill();
+      ctx.stroke();
+
+      // Ears
+      ctx.beginPath();
+      ctx.moveTo(-drawW / 2 + 10, -drawH / 2);
+      ctx.lineTo(-drawW / 2 + 25, -drawH / 2 - 28);
+      ctx.lineTo(-drawW / 2 + 40, -drawH / 2);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.moveTo(drawW / 2 - 40, -drawH / 2);
+      ctx.lineTo(drawW / 2 - 25, -drawH / 2 - 28);
+      ctx.lineTo(drawW / 2 - 10, -drawH / 2);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+
+      // Eyes & mouth
+      ctx.fillStyle = '#000000';
+      ctx.beginPath();
+      ctx.arc(-22, -15, 6, 0, Math.PI * 2);
+      ctx.arc(22, -15, 6, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Mouth :3
+      ctx.font = '900 24px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('ω', 0, 22);
+    }
+
+    // Glowing Eyes Overlay based on eyeState
+    if (boss.eyeState === 'glowing') {
+      ctx.fillStyle = '#facc15';
+      ctx.shadowColor = '#eab308';
+      ctx.shadowBlur = 14;
+      ctx.beginPath();
+      ctx.arc(-25, -20, 5, 0, Math.PI * 2);
+      ctx.arc(25, -20, 5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+    } else if (boss.eyeState === 'menacing') {
+      ctx.fillStyle = '#ef4444';
+      ctx.shadowColor = '#dc2626';
+      ctx.shadowBlur = 16;
+      ctx.beginPath();
+      ctx.arc(-25, -20, 6, 0, Math.PI * 2);
+      ctx.arc(25, -20, 6, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+    }
+
+    // Floating Circular Paws in front
+    const pawBob = Math.sin(gameTime * 4) * 4;
+    ctx.fillStyle = '#d1d5db';
+    ctx.strokeStyle = '#000000';
+    ctx.lineWidth = 3;
+
+    // Left Paw
+    ctx.beginPath();
+    ctx.arc(-boss.leftHand.progress * 30 - 45, 30 + pawBob, 14, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+
+    // Right Paw
+    ctx.beginPath();
+    ctx.arc(boss.rightHand.progress * 30 + 45, 30 - pawBob, 14, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.restore(); // restore cat transform
+
+    // 3. Sun Invocation & Black Hole Relativistic Accretion System
+    if (boss.blackHole.active) {
+      this.drawSunAndBlackHole(boss.blackHole, gameTime);
+    }
+
+    // 4. Reality Slashes
+    if (boss.slashes && boss.slashes.length > 0) {
+      this.drawRealitySlashes(boss.slashes, gameTime);
+    }
+
+    ctx.restore();
+  }
+
+  private drawSunAndBlackHole(bh: SantiscatBoss['blackHole'], gameTime: number) {
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.translate(bh.x, bh.y);
+
+    if (bh.phase === 'sun_charging' || bh.phase === 'compressing') {
+      // Celestial Radiant Sun
+      const scale = bh.phase === 'compressing' ? Math.max(0.3, 1.0 - (bh.timer / 1.2) * 0.7) : 1.0;
+      const r = 52 * scale;
+
+      // Sun Corona Glow
+      const coronaGrad = ctx.createRadialGradient(0, 0, r * 0.4, 0, 0, r * 2.2);
+      coronaGrad.addColorStop(0, '#ffffff');
+      coronaGrad.addColorStop(0.3, '#fde047');
+      coronaGrad.addColorStop(0.7, '#ea580c');
+      coronaGrad.addColorStop(1, 'rgba(239, 68, 68, 0)');
+      ctx.fillStyle = coronaGrad;
+      ctx.beginPath();
+      ctx.arc(0, 0, r * 2.2, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Solar flare arcs
+      ctx.save();
+      ctx.rotate(gameTime * 2);
+      ctx.strokeStyle = 'rgba(253, 224, 71, 0.7)';
+      ctx.lineWidth = 3;
+      for (let i = 0; i < 6; i++) {
+        const a = (i * Math.PI * 2) / 6;
+        ctx.beginPath();
+        ctx.arc(Math.cos(a) * r * 0.9, Math.sin(a) * r * 0.9, r * 0.4, 0, Math.PI);
+        ctx.stroke();
+      }
+      ctx.restore();
+
+      // Solid incandescent core
+      ctx.fillStyle = '#fffbeb';
+      ctx.beginPath();
+      ctx.arc(0, 0, r * 0.85, 0, Math.PI * 2);
+      ctx.fill();
+
+    } else if (bh.phase === 'black_hole_active') {
+      // Relativistic Black Hole with Accretion Disk & Einstein Ring
+      const r = bh.radius;
+
+      // Gravitational lensing outer warp halo
+      const lensGrad = ctx.createRadialGradient(0, 0, r * 0.9, 0, 0, r * 3.2);
+      lensGrad.addColorStop(0, 'rgba(249, 115, 22, 0.55)');
+      lensGrad.addColorStop(0.4, 'rgba(168, 85, 247, 0.35)');
+      lensGrad.addColorStop(0.8, 'rgba(56, 189, 248, 0.15)');
+      lensGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+      ctx.fillStyle = lensGrad;
+      ctx.beginPath();
+      ctx.arc(0, 0, r * 3.2, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Glowing swirling accretion disk
+      ctx.save();
+      ctx.rotate(gameTime * 3.5);
+      ctx.strokeStyle = '#f97316';
+      ctx.lineWidth = 9;
+      ctx.shadowColor = '#ea580c';
+      ctx.shadowBlur = 20;
+      ctx.beginPath();
+      ctx.arc(0, 0, r * 1.55, 0, Math.PI * 2);
+      ctx.stroke();
+
+      ctx.strokeStyle = '#38bdf8';
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.arc(0, 0, r * 1.85, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+      ctx.restore();
+
+      // Orbiting absorbed debris caught in the gravitational vortex
+      bh.absorbedDebris.forEach(deb => {
+        const dx = Math.cos(deb.angle) * deb.dist;
+        const dy = Math.sin(deb.angle) * deb.dist;
+        ctx.fillStyle = deb.color || '#94a3b8';
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.arc(dx, dy, deb.radius, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+      });
+
+      // Event Horizon: Absolute Pure Void Blackness
+      ctx.fillStyle = '#000000';
+      ctx.beginPath();
+      ctx.arc(0, 0, r, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Relativistic photon sphere ring
+      ctx.strokeStyle = '#fed7aa';
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.arc(0, 0, r + 2, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    ctx.restore();
+  }
+
+  private drawRealitySlashes(slashes: SantiscatBoss['slashes'], gameTime: number) {
+    const ctx = this.ctx;
+    ctx.save();
+
+    slashes.forEach(s => {
+      if (s.phase === 'telegraph') {
+        // Red flashing laser warning line
+        const pulse = Math.floor(gameTime * 24) % 2 === 0 ? 0.9 : 0.35;
+        ctx.strokeStyle = `rgba(239, 68, 68, ${pulse})`;
+        ctx.lineWidth = 2.5;
+        ctx.setLineDash([12, 8]);
+        ctx.beginPath();
+        ctx.moveTo(s.x1, s.y1);
+        ctx.lineTo(s.x2, s.y2);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+      } else if (s.phase === 'slash') {
+        // Dimension-shattering reality tear
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = s.width * 1.1;
+        ctx.shadowColor = '#06b6d4';
+        ctx.shadowBlur = 24;
+        ctx.beginPath();
+        ctx.moveTo(s.x1, s.y1);
+        ctx.lineTo(s.x2, s.y2);
+        ctx.stroke();
+
+        ctx.strokeStyle = '#ec4899';
+        ctx.lineWidth = s.width * 0.6;
+        ctx.stroke();
+        ctx.shadowBlur = 0;
+
+      } else {
+        // Fading residual quantum scar
+        ctx.strokeStyle = 'rgba(168, 85, 247, 0.4)';
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.moveTo(s.x1, s.y1);
+        ctx.lineTo(s.x2, s.y2);
+        ctx.stroke();
+      }
+    });
 
     ctx.restore();
   }

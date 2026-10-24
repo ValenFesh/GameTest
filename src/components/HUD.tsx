@@ -344,6 +344,103 @@ export const HUD: React.FC<HUDProps> = ({
               </div>
             </div>
           )}
+
+          {/* Level 4: Distorted Reality Exploration */}
+          {stage === 'distorted' && (
+            <div className="bg-neutral-900/90 backdrop-blur-md border border-fuchsia-500/40 rounded-2xl p-2.5 shadow-xl text-center">
+              <div className="flex justify-between items-center text-xs font-bold mb-1">
+                <span className="text-fuchsia-400 font-display">🌀 NIVEL 4: REALIDAD DISTORSIONADA</span>
+                <span className="text-cyan-300">
+                  Altar: {Math.round(Math.hypot(player.x - 1600, player.y - 1200))}m
+                </span>
+              </div>
+              <div className="text-[11px] text-neutral-300 flex items-center justify-center gap-2">
+                <span>🧭 Sigue las coordenadas hasta el Altar (1600, 1200) para invocar a Santiscat</span>
+              </div>
+            </div>
+          )}
+
+          {/* Level 4: Rhythm Summon Minigame */}
+          {stage === 'rhythm_summon' && engine.rhythmGame && (
+            <div className="bg-neutral-900/95 backdrop-blur-md border-2 border-amber-500/80 rounded-2xl p-3 shadow-2xl text-center">
+              <div className="flex justify-between items-center text-xs font-black mb-1">
+                <span className="text-amber-400 font-display text-sm tracking-wide">
+                  🎵 INVOCACIÓN AL RITMO DEL BEAT
+                </span>
+                <span className="text-white bg-amber-500/20 px-2.5 py-0.5 rounded-full border border-amber-400">
+                  {engine.rhythmGame.totalHits} / {engine.rhythmGame.requiredHits} BEATS
+                </span>
+              </div>
+              <div className="w-full h-3 bg-neutral-950 rounded-full border border-neutral-700 overflow-hidden relative mb-1">
+                <div
+                  className="h-full bg-gradient-to-r from-amber-500 via-orange-400 to-yellow-300 rounded-full transition-all duration-150"
+                  style={{ width: `${Math.min(100, (engine.rhythmGame.totalHits / engine.rhythmGame.requiredHits) * 100)}%` }}
+                />
+              </div>
+              <div className="text-[11px] text-neutral-300 font-bold">
+                Presiona [ESPACIO / E] cuando los anillos colapsen sobre el círculo central
+              </div>
+            </div>
+          )}
+
+          {/* Level 4: Santiscat Boss */}
+          {stage === 'santiscat_boss' && engine.santiscat && (
+            <div className="bg-neutral-950/95 backdrop-blur-md border-2 border-purple-500/70 rounded-2xl p-2.5 shadow-2xl">
+              <div className="flex items-center justify-between gap-2 mb-1">
+                <div className="flex items-center gap-2">
+                  {/* Santiscat avatar */}
+                  <img
+                    src="/assets/aistudio/santiscat_18f093e7.png"
+                    alt="Santiscat"
+                    className="w-7 h-7 rounded border border-purple-400 bg-neutral-900 object-cover"
+                  />
+                  <span className="font-black text-transparent bg-clip-text bg-gradient-to-r from-purple-400 via-fuchsia-300 to-cyan-400 font-display text-sm tracking-widest">
+                    SANTISCAT (JEFE CÓSMICO)
+                  </span>
+                </div>
+                <div className="text-xs font-bold text-neutral-300">
+                  {Math.ceil(engine.santiscat.hp)} / {engine.santiscat.maxHp} HP
+                </div>
+              </div>
+
+              {/* Boss HP Bar */}
+              <div className="w-full h-3.5 bg-neutral-900 rounded-full p-0.5 border border-purple-900 overflow-hidden relative">
+                <div
+                  className="h-full bg-gradient-to-r from-purple-600 via-fuchsia-500 to-cyan-400 rounded-full transition-all duration-100"
+                  style={{ width: `${Math.max(0, (engine.santiscat.hp / engine.santiscat.maxHp) * 100)}%` }}
+                />
+              </div>
+
+              {/* Boss Status Badges */}
+              <div className="flex items-center justify-center gap-2 mt-1.5 text-[11px] font-bold">
+                {engine.santiscat.currentAttack === 'sun_burst' && (
+                  <span className="bg-amber-600/90 text-white px-2.5 py-0.5 rounded-full border border-amber-300 animate-pulse">
+                    ☀️ INVOCANDO SOL ({engine.santiscat.blackHole.sunShotsFired}/5 DISPAROS)
+                  </span>
+                )}
+                {engine.santiscat.currentAttack === 'compress_black_hole' && (
+                  <span className="bg-indigo-700/95 text-white px-2.5 py-0.5 rounded-full border border-indigo-400 animate-pulse font-black">
+                    🌌 COMPRIMIENDO SOL EN AGUJERO NEGRO...
+                  </span>
+                )}
+                {engine.santiscat.currentAttack === 'black_hole_chase' && (
+                  <span className="bg-black/90 text-orange-400 px-2.5 py-0.5 rounded-full border border-orange-500 animate-bounce font-black">
+                    🕳️ ¡AGUJERO NEGRO ACTIVO! CURVATURA ESPACIAL
+                  </span>
+                )}
+                {engine.santiscat.currentAttack === 'oneshot_fireball' && (
+                  <span className="bg-red-700/95 text-white px-2.5 py-0.5 rounded-full border border-rose-300 animate-pulse font-black">
+                    🔥 ¡BOLA DE FUEGO ONE-SHOT! (LETAL / USA ESCUDO)
+                  </span>
+                )}
+                {engine.santiscat.currentAttack === 'reality_slashes' && (
+                  <span className="bg-cyan-700/90 text-white px-2.5 py-0.5 rounded-full border border-cyan-300 animate-pulse font-black">
+                    ⚔️ ¡CORTES EN LA REALIDAD! FRACTURA DIMENSIONAL
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Right Corner: Black Flash Counter & Audio */}
@@ -650,6 +747,20 @@ export const HUD: React.FC<HUDProps> = ({
             </button>
           )}
         </div>
+
+        {/* Level 4 Rhythm Minigame Big Action Tap Button */}
+        {stage === 'rhythm_summon' && (
+          <div className="flex justify-center pointer-events-auto my-1">
+            <button
+              onClick={() => engine.hitRhythmBeat()}
+              className="px-8 py-3.5 bg-gradient-to-r from-amber-500 via-orange-500 to-rose-500 hover:from-amber-400 hover:to-rose-400 text-white font-black font-display text-base tracking-widest rounded-2xl border-2 border-yellow-300 shadow-2xl shadow-amber-500/50 active:scale-95 transition-transform cursor-pointer animate-pulse flex items-center gap-2.5"
+            >
+              <span>🎵</span>
+              <span>¡TOCAR RITMO! [ESPACIO / CLICK]</span>
+              <span>🎵</span>
+            </button>
+          </div>
+        )}
 
         {/* Desktop Helper Text */}
         <div className="text-[11px] text-neutral-400/90 font-medium bg-neutral-950/80 px-3 py-1 rounded-full border border-neutral-800 flex items-center gap-2 flex-wrap justify-center">

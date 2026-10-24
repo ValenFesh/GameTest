@@ -5,6 +5,7 @@ import {
   Boss,
   BossAttack,
   BossDrone,
+  Camera,
   CharacterSkinId,
   CinematicState,
   DamageNumber,
@@ -14,6 +15,11 @@ import {
   Particle,
   Player,
   Projectile,
+  RealityGlitch,
+  RhythmBeat,
+  RhythmGameState,
+  SantiscatAttack,
+  SantiscatBoss,
 } from '../types/game';
 import {
   CHARACTER_SKINS,
@@ -32,6 +38,7 @@ export class GameEngine {
 
   public currentSkin: CharacterSkinId = 'catvalen';
   public nanovalenWins: number = 0;
+  public santiscatWins: number = 0;
   public adminUnlockAll: boolean = false;
   public godMode: boolean = false;
   public infiniteHeals: boolean = false;
@@ -51,6 +58,12 @@ export class GameEngine {
   public particles: Particle[] = [];
   public blackFlashStrikes: BlackFlashStrike[] = [];
   public damageNumbers: DamageNumber[] = [];
+
+  // Level 4: Distorted Reality, Rhythm Summoning, and Santiscat Boss
+  public camera: Camera;
+  public santiscat: SantiscatBoss | null = null;
+  public rhythmGame: RhythmGameState | null = null;
+  public glitches: RealityGlitch[] = [];
 
   public stats: GameStats = {
     score: 0,
@@ -75,6 +88,14 @@ export class GameEngine {
   constructor(width: number, height: number) {
     this.width = width;
     this.height = height;
+    this.camera = {
+      x: 0,
+      y: 0,
+      viewportWidth: width,
+      viewportHeight: height,
+      worldWidth: width,
+      worldHeight: height,
+    };
     this.nanovalenWins = getSavedNanovalenWins();
     this.adminUnlockAll = getAdminUnlockAll();
     this.currentSkin = getSavedSelectedSkin();
@@ -112,6 +133,12 @@ export class GameEngine {
     }
   }
 
+  public instaKillSantiscat() {
+    if (this.santiscat && this.stage === 'santiscat_boss') {
+      this.applyDamageToSantiscat(99999, 'punch', this.santiscat.x, this.santiscat.y);
+    }
+  }
+
   public jumpToStage(targetStage: GameStage) {
     if (targetStage === 'start') {
       this.resetToMenu();
@@ -137,9 +164,14 @@ export class GameEngine {
   public resize(width: number, height: number) {
     this.width = width;
     this.height = height;
-    // Keep player in bounds
-    if (this.player.x > width - 100) this.player.x = width - 100;
-    if (this.player.y > height - 80) this.player.y = height - 80;
+    this.camera.viewportWidth = width;
+    this.camera.viewportHeight = height;
+    if (this.stage !== 'distorted' && this.stage !== 'rhythm_summon' && this.stage !== 'santiscat_boss') {
+      this.camera.worldWidth = width;
+      this.camera.worldHeight = height;
+      if (this.player.x > width - 100) this.player.x = width - 100;
+      if (this.player.y > height - 80) this.player.y = height - 80;
+    }
   }
 
   public createInitialPlayer(skinId: CharacterSkinId = this.currentSkin): Player {
@@ -213,14 +245,29 @@ export class GameEngine {
     this.blackFlashStrikes = [];
 
     if (stage === 'city') {
+      this.camera.worldWidth = this.width;
+      this.camera.worldHeight = this.height;
       this.stageTarget = 100;
       soundManager.playMusic('city');
     } else if (stage === 'space') {
+      this.camera.worldWidth = this.width;
+      this.camera.worldHeight = this.height;
       this.stageTarget = 100;
       soundManager.playMusic('space');
     } else if (stage === 'boss') {
+      this.camera.worldWidth = this.width;
+      this.camera.worldHeight = this.height;
       soundManager.playMusic('boss');
       this.initBoss();
+    } else if (stage === 'distorted') {
+      soundManager.playMusic('distorted');
+      this.initDistortedWorld();
+    } else if (stage === 'rhythm_summon') {
+      soundManager.playMusic('distorted');
+      this.initRhythmSummon();
+    } else if (stage === 'santiscat_boss') {
+      soundManager.playMusic('santiscat');
+      this.initSantiscatBoss();
     }
   }
 
@@ -229,6 +276,9 @@ export class GameEngine {
     this.player = this.createInitialPlayer();
     this.cinematic = null;
     this.drones = [];
+    this.santiscat = null;
+    this.rhythmGame = null;
+    this.glitches = [];
     this.stats = {
       score: 0,
       buildingsDestroyed: 0,
@@ -256,6 +306,11 @@ export class GameEngine {
     this.damageNumbers = [];
     this.cinematic = null;
     this.boss = null;
+    this.santiscat = null;
+    this.rhythmGame = null;
+    this.glitches = [];
+    this.camera.x = 0;
+    this.camera.y = 0;
     this.player = this.createInitialPlayer();
     this.stats = {
       score: 0,
@@ -279,6 +334,23 @@ export class GameEngine {
     if (this.stage === 'cinematic_earth_destruction') {
       this.skipCinematic();
       return;
+    }
+
+    // In Distorted reality: interact with Ancient Altar
+    if (this.stage === 'distorted' && (code === 'Space' || code === 'KeyE')) {
+      const distToAltar = Math.hypot(this.player.x - 1600, this.player.y - 1200);
+      if (distToAltar < 140) {
+        this.startStage('rhythm_summon');
+        return;
+      }
+    }
+
+    // In Rhythm Summon Minigame: tap the beat!
+    if (this.stage === 'rhythm_summon') {
+      if (code === 'Space' || code === 'KeyE' || code === 'KeyJ' || code === 'KeyF') {
+        this.hitRhythmBeat();
+        return;
+      }
     }
 
     // Direct action hotkeys
@@ -358,6 +430,14 @@ export class GameEngine {
       const bossDist = Math.hypot(punchX - this.boss.x, punchY - this.boss.y);
       if (bossDist < 100) {
         this.applyDamageToBoss(45, 'punch', punchX, punchY, true);
+      }
+    }
+
+    // Check hit on Santiscat Boss in Level 4
+    if (this.santiscat && this.stage === 'santiscat_boss') {
+      const sDist = Math.hypot(punchX - this.santiscat.x, punchY - this.santiscat.y);
+      if (sDist < 120) {
+        this.applyDamageToSantiscat(55, 'punch', punchX, punchY);
       }
     }
 
@@ -1220,34 +1300,44 @@ export class GameEngine {
     this.drones = [];
   }
 
-  private triggerVictory() {
+  private triggerVictory(isSantiscat: boolean = false) {
     this.stage = 'victory';
     soundManager.stopMusic();
     soundManager.playVictory();
-    this.screenShake = 22;
+    this.screenShake = 24;
 
-    const prevWins = this.nanovalenWins;
-    this.nanovalenWins = prevWins + 1;
-    saveNanovalenWins(this.nanovalenWins);
-    this.stats.nanovalenWins = this.nanovalenWins;
-
-    // Check if any skin has just unlocked!
-    const newlyUnlocked: string[] = [];
-    (Object.keys(CHARACTER_SKINS) as CharacterSkinId[]).forEach(sId => {
-      const skin = CHARACTER_SKINS[sId];
-      if (skin.requiredWins > 0 && prevWins < skin.requiredWins && this.nanovalenWins >= skin.requiredWins) {
-        newlyUnlocked.push(skin.name);
+    if (isSantiscat) {
+      this.santiscatWins = (this.santiscatWins || 0) + 1;
+      this.stats.santiscatWins = this.santiscatWins;
+      if (this.santiscat) {
+        this.spawnRubble(this.santiscat.x, this.santiscat.y, '#a855f7', 45);
+        this.spawnRubble(this.santiscat.x, this.santiscat.y, '#f59e0b', 35);
+        this.spawnHitParticles(this.santiscat.x, this.santiscat.y, '#38bdf8', 40);
       }
-    });
+    } else {
+      const prevWins = this.nanovalenWins;
+      this.nanovalenWins = prevWins + 1;
+      saveNanovalenWins(this.nanovalenWins);
+      this.stats.nanovalenWins = this.nanovalenWins;
 
-    if (newlyUnlocked.length > 0) {
-      this.stats.unlockedSkinNotice = newlyUnlocked.join(', ');
-    }
+      // Check if any skin has just unlocked!
+      const newlyUnlocked: string[] = [];
+      (Object.keys(CHARACTER_SKINS) as CharacterSkinId[]).forEach(sId => {
+        const skin = CHARACTER_SKINS[sId];
+        if (skin.requiredWins > 0 && prevWins < skin.requiredWins && this.nanovalenWins >= skin.requiredWins) {
+          newlyUnlocked.push(skin.name);
+        }
+      });
 
-    // Victory explosion around Nanovalen
-    if (this.boss) {
-      this.spawnRubble(this.boss.x, this.boss.y, '#f43f5e', 45);
-      this.spawnRubble(this.boss.x, this.boss.y, '#38bdf8', 35);
+      if (newlyUnlocked.length > 0) {
+        this.stats.unlockedSkinNotice = newlyUnlocked.join(', ');
+      }
+
+      // Victory explosion around Nanovalen
+      if (this.boss) {
+        this.spawnRubble(this.boss.x, this.boss.y, '#f43f5e', 45);
+        this.spawnRubble(this.boss.x, this.boss.y, '#38bdf8', 35);
+      }
     }
 
     if (this.onVictoryCallback) {
@@ -1379,6 +1469,9 @@ export class GameEngine {
       }
     }
 
+    // Update Camera
+    this.updateCamera(delta);
+
     // Update Player (Always updates even during Time Stop!)
     this.updatePlayer(delta);
 
@@ -1394,6 +1487,15 @@ export class GameEngine {
     if (this.stage === 'boss' && !this.player.timeStopActive) {
       if (this.boss) this.updateBoss(delta);
       this.updateDrones(delta);
+    }
+
+    // Level 4 Stages updates
+    if (this.stage === 'distorted') {
+      this.updateDistorted(delta);
+    } else if (this.stage === 'rhythm_summon') {
+      this.updateRhythmGame(delta);
+    } else if (this.stage === 'santiscat_boss') {
+      this.updateSantiscat(delta);
     }
 
     // Update Effects
@@ -1545,12 +1647,15 @@ export class GameEngine {
       }
     }
 
-    // Clamp inside arena
-    const margin = 35;
+    // Clamp inside arena / world
+    const margin = 40;
+    const isLevel4 = this.stage === 'distorted' || this.stage === 'rhythm_summon' || this.stage === 'santiscat_boss';
+    const boundX = isLevel4 ? this.camera.worldWidth - margin : this.width - margin;
+    const boundY = isLevel4 ? this.camera.worldHeight - margin : this.height - margin;
     if (p.x < margin) p.x = margin;
-    if (p.x > this.width - margin) p.x = this.width - margin;
+    if (p.x > boundX) p.x = boundX;
     if (p.y < margin) p.y = margin;
-    if (p.y > this.height - margin) p.y = this.height - margin;
+    if (p.y > boundY) p.y = boundY;
 
     // Cooldowns
     if (this.infiniteHeals) {
@@ -1934,6 +2039,17 @@ export class GameEngine {
             }
           }
         }
+
+        // Check collision with Santiscat Boss in Level 4
+        if (this.santiscat && this.stage === 'santiscat_boss') {
+          const sDist = Math.hypot(p.x - this.santiscat.x, p.y - this.santiscat.y);
+          if (sDist < this.santiscat.width / 2 + p.radius) {
+            this.applyDamageToSantiscat(p.damage, p.type.replace('player_', '') as AttackType, p.x, p.y);
+            if (p.type !== 'player_light_laser') {
+              p.duration = p.maxDuration;
+            }
+          }
+        }
       } else if (p.type === 'boss_meteor' || p.type === 'boss_drone_laser' || p.type === 'boss_pulse_laser') {
         // Nanovalen meteor or drone laser hits player
         const pDist = Math.hypot(p.x - this.player.x, p.y - this.player.y);
@@ -1941,11 +2057,54 @@ export class GameEngine {
           this.takePlayerDamage(p.damage, p.type === 'boss_meteor' ? 'meteor' : 'laser');
           p.duration = p.maxDuration;
         }
+      } else if (p.type === 'santiscat_sun_shot') {
+        const pDist = Math.hypot(p.x - this.player.x, p.y - this.player.y);
+        if (pDist < this.player.width * 0.45 + p.radius) {
+          this.takePlayerDamage(p.damage, 'laser');
+          p.duration = p.maxDuration;
+        }
+      } else if (p.type === 'santiscat_oneshot_fireball') {
+        const pDist = Math.hypot(p.x - this.player.x, p.y - this.player.y);
+        if (pDist < this.player.width * 0.45 + p.radius) {
+          if (this.player.shieldActive) {
+            soundManager.playShieldAbsorb();
+            this.damageNumbers.push({
+              id: Math.random().toString(),
+              text: '🛡️ ¡ONE-SHOT ANULADO CON ESCUDO!',
+              x: this.player.x,
+              y: this.player.y - 30,
+              vy: -1.6,
+              color: '#34d399',
+              isBlackFlash: false,
+              life: 1.6,
+              maxLife: 1.6,
+              scale: 1.3,
+            });
+            this.spawnHitParticles(this.player.x, this.player.y, '#34d399', 18);
+          } else if (!this.godMode && !this.player.isInvulnerable) {
+            // One-Shot Death required by user!
+            this.stats.deathReason = 'santiscat_oneshot';
+            this.takePlayerDamage(99999, 'collision');
+          }
+          p.duration = p.maxDuration;
+        }
+      } else if (p.type === 'santiscat_debris') {
+        const pDist = Math.hypot(p.x - this.player.x, p.y - this.player.y);
+        if (pDist < this.player.width * 0.45 + p.radius) {
+          this.takePlayerDamage(p.damage, 'collision');
+          p.duration = p.maxDuration;
+        }
       }
     });
 
     // Remove expired
-    this.projectiles = this.projectiles.filter(p => p.duration < p.maxDuration && p.x > -100 && p.x < this.width + 100);
+    const maxBoundX = (this.stage === 'distorted' || this.stage === 'rhythm_summon' || this.stage === 'santiscat_boss')
+      ? this.camera.worldWidth + 150
+      : this.width + 100;
+    const maxBoundY = (this.stage === 'distorted' || this.stage === 'rhythm_summon' || this.stage === 'santiscat_boss')
+      ? this.camera.worldHeight + 150
+      : this.height + 100;
+    this.projectiles = this.projectiles.filter(p => p.duration < p.maxDuration && p.x > -150 && p.x < maxBoundX && p.y > -150 && p.y < maxBoundY);
   }
 
   // --- NANOVALEN BOSS AI & ATTACK LOGIC ---
@@ -2631,5 +2790,711 @@ export class GameEngine {
       d.y += d.vy * delta * 60;
     });
     this.damageNumbers = this.damageNumbers.filter(d => d.life > 0);
+  }
+
+  // =========================================================================
+  // LEVEL 4: DISTORTED REALITY, RHYTHM SUMMON & SANTISCAT BOSS METHODS
+  // =========================================================================
+
+  private updateCamera(delta: number) {
+    const isLevel4 = this.stage === 'distorted' || this.stage === 'rhythm_summon' || this.stage === 'santiscat_boss';
+    if (isLevel4) {
+      const targetCamX = this.player.x - this.camera.viewportWidth / 2;
+      const targetCamY = this.player.y - this.camera.viewportHeight / 2;
+      this.camera.x += (targetCamX - this.camera.x) * 0.12;
+      this.camera.y += (targetCamY - this.camera.y) * 0.12;
+      const maxCamX = Math.max(0, this.camera.worldWidth - this.camera.viewportWidth);
+      const maxCamY = Math.max(0, this.camera.worldHeight - this.camera.viewportHeight);
+      this.camera.x = Math.max(0, Math.min(maxCamX, this.camera.x));
+      this.camera.y = Math.max(0, Math.min(maxCamY, this.camera.y));
+    } else {
+      this.camera.x = 0;
+      this.camera.y = 0;
+    }
+  }
+
+  public initDistortedWorld() {
+    this.stage = 'distorted';
+    this.camera.worldWidth = 3200;
+    this.camera.worldHeight = 2400;
+    this.player.x = 400;
+    this.player.y = 1200;
+    this.player.vx = 0;
+    this.player.vy = 0;
+    this.obstacles = [];
+    this.projectiles = [];
+    this.drones = [];
+    this.boss = null;
+    this.santiscat = null;
+    this.rhythmGame = null;
+
+    // Populate large distorted world with floating buildings & space asteroids
+    for (let i = 0; i < 35; i++) {
+      const ox = 250 + Math.random() * 2700;
+      const oy = 200 + Math.random() * 2000;
+      // Keep altar clear
+      if (Math.hypot(ox - 1600, oy - 1200) < 260) continue;
+
+      const isBuilding = Math.random() > 0.5;
+      if (isBuilding) {
+        this.obstacles.push({
+          id: `dist_b_${i}`,
+          type: 'building',
+          x: ox,
+          y: oy,
+          width: 80 + Math.random() * 45,
+          height: 120 + Math.random() * 140,
+          hp: 120,
+          maxHp: 120,
+          vx: (Math.random() - 0.5) * 0.3,
+          vy: (Math.random() - 0.5) * 0.3,
+          color: '#334155',
+          rotation: (Math.random() - 0.5) * 0.4,
+          rotationSpeed: (Math.random() - 0.5) * 0.05,
+        });
+      } else {
+        this.obstacles.push({
+          id: `dist_ast_${i}`,
+          type: 'asteroid',
+          x: ox,
+          y: oy,
+          width: 50 + Math.random() * 40,
+          height: 50 + Math.random() * 40,
+          hp: 90,
+          maxHp: 90,
+          vx: (Math.random() - 0.5) * 0.6,
+          vy: (Math.random() - 0.5) * 0.6,
+          color: '#6366f1',
+          rotation: Math.random() * Math.PI,
+          rotationSpeed: (Math.random() - 0.5) * 0.3,
+        });
+      }
+    }
+
+    // Populate Reality Glitches / Spacetime Faults
+    this.glitches = [];
+    const glitchTypes: ('fault_line' | 'chromatic_vortex' | 'quantum_tear')[] = ['fault_line', 'chromatic_vortex', 'quantum_tear'];
+    for (let i = 0; i < 20; i++) {
+      const gx = 250 + Math.random() * 2700;
+      const gy = 200 + Math.random() * 2000;
+      if (Math.hypot(gx - 1600, gy - 1200) < 280) continue;
+      this.glitches.push({
+        id: `glitch_${i}`,
+        x: gx,
+        y: gy,
+        width: 85 + Math.random() * 75,
+        height: 38 + Math.random() * 38,
+        type: glitchTypes[i % 3],
+        pulseTimer: Math.random() * Math.PI * 2,
+        damage: 25,
+        angle: Math.random() * Math.PI * 2,
+      });
+    }
+  }
+
+  private updateDistorted(delta: number) {
+    // Ambient floating obstacle physics
+    this.obstacles.forEach(obs => {
+      obs.x += obs.vx * delta * 60;
+      obs.y += obs.vy * delta * 60;
+      if (obs.rotationSpeed) {
+        obs.rotation = (obs.rotation || 0) + obs.rotationSpeed * delta;
+      }
+      // Check collision with player
+      const p = this.player;
+      if (
+        p.x + p.width * 0.4 > obs.x &&
+        p.x - p.width * 0.4 < obs.x + obs.width &&
+        p.y + p.height * 0.4 > obs.y &&
+        p.y - p.height * 0.4 < obs.y + obs.height
+      ) {
+        this.takePlayerDamage(22, 'collision');
+        obs.hp -= 20;
+      }
+    });
+
+    // Update Reality Glitches & check player contact
+    this.glitches.forEach(g => {
+      g.pulseTimer += delta * 3;
+      const dist = Math.hypot(this.player.x - g.x, this.player.y - g.y);
+      if (dist < (g.width * 0.45 + this.player.width * 0.4)) {
+        if (!this.player.shieldActive && !this.player.isInvulnerable && !this.godMode) {
+          this.takePlayerDamage(g.damage, 'collision');
+          this.stats.deathReason = 'reality_tear';
+          this.spawnHitParticles(g.x, g.y, '#ec4899', 14);
+          this.spawnHitParticles(g.x, g.y, '#06b6d4', 14);
+          soundManager.playRealitySlash();
+        }
+      }
+    });
+
+    // Proximity to Ancient Altar
+    const distToAltar = Math.hypot(this.player.x - 1600, this.player.y - 1200);
+    if (distToAltar < 80) {
+      this.startStage('rhythm_summon');
+    }
+  }
+
+  public initRhythmSummon() {
+    this.stage = 'rhythm_summon';
+    this.camera.worldWidth = 3200;
+    this.camera.worldHeight = 2400;
+    this.player.x = 1600;
+    this.player.y = 1380;
+    this.player.vx = 0;
+    this.player.vy = 0;
+    this.obstacles = [];
+    this.projectiles = [];
+
+    const bpm = 128;
+    const beatInterval = 60 / bpm; // ~0.46875s
+    const beats: RhythmBeat[] = [];
+    for (let i = 0; i < 14; i++) {
+      beats.push({
+        id: `beat_${i}`,
+        targetTime: 1.4 + i * beatInterval,
+        hit: false,
+        missed: false,
+      });
+    }
+
+    this.rhythmGame = {
+      active: true,
+      timer: 0,
+      duration: 1.4 + 14 * beatInterval + 1.2,
+      bpm,
+      beats,
+      score: 0,
+      combo: 0,
+      maxCombo: 0,
+      requiredHits: 8,
+      totalHits: 0,
+      completed: false,
+      failed: false,
+      altarX: 1600,
+      altarY: 1200,
+    };
+  }
+
+  private updateRhythmGame(delta: number) {
+    if (!this.rhythmGame || !this.rhythmGame.active) return;
+    const rg = this.rhythmGame;
+    rg.timer += delta;
+
+    // Check misses
+    rg.beats.forEach(b => {
+      if (!b.hit && !b.missed && rg.timer > b.targetTime + 0.2) {
+        b.missed = true;
+        b.rating = 'miss';
+        rg.combo = 0;
+      }
+    });
+
+    // Check completion
+    if (rg.totalHits >= rg.requiredHits && !rg.completed) {
+      rg.completed = true;
+      this.triggerSantiscatSummonSequence();
+    } else if (rg.timer >= rg.duration && !rg.completed) {
+      // Loop or restart beats smoothly
+      this.initRhythmSummon();
+    }
+  }
+
+  public hitRhythmBeat(): boolean {
+    if (!this.rhythmGame || !this.rhythmGame.active || this.stage !== 'rhythm_summon') return false;
+    const rg = this.rhythmGame;
+    const curTime = rg.timer;
+
+    let bestBeat: RhythmBeat | null = null;
+    let minDelta = Infinity;
+
+    for (const b of rg.beats) {
+      if (b.hit || b.missed) continue;
+      const dt = Math.abs(curTime - b.targetTime);
+      if (dt < 0.22 && dt < minDelta) {
+        minDelta = dt;
+        bestBeat = b;
+      }
+    }
+
+    if (bestBeat) {
+      bestBeat.hit = true;
+      rg.totalHits++;
+      rg.combo++;
+      rg.maxCombo = Math.max(rg.maxCombo, rg.combo);
+
+      let rating: 'perfect' | 'great' = 'great';
+      let scoreGain = 80;
+      let col = '#38bdf8';
+
+      if (minDelta <= 0.08) {
+        rating = 'perfect';
+        scoreGain = 150;
+        col = '#facc15';
+      }
+
+      bestBeat.rating = rating;
+      rg.score += scoreGain;
+      soundManager.playRhythmHit(rating);
+      this.screenShake = rating === 'perfect' ? 12 : 7;
+
+      this.damageNumbers.push({
+        id: Math.random().toString(),
+        text: rating === 'perfect' ? '★ ¡PERFECTO! ★' : '¡GENIAL!',
+        x: rg.altarX + (Math.random() - 0.5) * 40,
+        y: rg.altarY - 70,
+        vy: -1.7,
+        color: col,
+        isBlackFlash: rating === 'perfect',
+        life: 0.9,
+        maxLife: 0.9,
+        scale: rating === 'perfect' ? 1.45 : 1.2,
+      });
+
+      this.spawnHitParticles(rg.altarX, rg.altarY, col, 16);
+
+      if (rg.totalHits >= rg.requiredHits && !rg.completed) {
+        rg.completed = true;
+        this.triggerSantiscatSummonSequence();
+      }
+      return true;
+    } else {
+      rg.combo = 0;
+      this.damageNumbers.push({
+        id: Math.random().toString(),
+        text: 'FALLO',
+        x: rg.altarX,
+        y: rg.altarY - 50,
+        vy: -1.2,
+        color: '#94a3b8',
+        isBlackFlash: false,
+        life: 0.7,
+        maxLife: 0.7,
+        scale: 1.0,
+      });
+      return false;
+    }
+  }
+
+  public triggerSantiscatSummonSequence() {
+    soundManager.playSantiscatSummon();
+    this.screenShake = 34;
+    this.spawnHitParticles(1600, 1200, '#a855f7', 45);
+    this.spawnHitParticles(1600, 1200, '#38bdf8', 40);
+    this.spawnHitParticles(1600, 1200, '#f59e0b', 35);
+    this.spawnRubble(1600, 1200, '#ffffff', 25);
+
+    setTimeout(() => {
+      this.startStage('santiscat_boss');
+    }, 1300);
+  }
+
+  public initSantiscatBoss() {
+    this.stage = 'santiscat_boss';
+    this.camera.worldWidth = 3200;
+    this.camera.worldHeight = 2400;
+    this.obstacles = [];
+    this.projectiles = [];
+    this.drones = [];
+
+    // Ambient arena debris for black hole absorption
+    for (let i = 0; i < 28; i++) {
+      const ox = 500 + Math.random() * 2200;
+      const oy = 400 + Math.random() * 1600;
+      if (Math.hypot(ox - 1600, oy - 1200) < 180) continue;
+      this.obstacles.push({
+        id: `santis_obs_${i}`,
+        type: Math.random() > 0.5 ? 'building' : 'meteorite',
+        x: ox,
+        y: oy,
+        width: 48 + Math.random() * 30,
+        height: 48 + Math.random() * 30,
+        hp: 75,
+        maxHp: 75,
+        vx: (Math.random() - 0.5) * 0.4,
+        vy: (Math.random() - 0.5) * 0.4,
+        color: '#a855f7',
+        rotation: Math.random() * Math.PI,
+        rotationSpeed: (Math.random() - 0.5) * 0.3,
+      });
+    }
+
+    this.santiscat = {
+      x: 1600,
+      y: 950,
+      vx: 0,
+      vy: 0,
+      width: 140,
+      height: 140,
+      hp: 4800,
+      maxHp: 4800,
+      shieldActive: false,
+      shieldTimer: 0,
+      currentAttack: 'idle',
+      attackTimer: 0,
+      attackCooldown: 1.8,
+      floatOffset: 0,
+      blackHole: {
+        active: false,
+        x: 1600,
+        y: 830,
+        vx: 0,
+        vy: 0,
+        radius: 46,
+        phase: 'sun_charging',
+        sunShotsFired: 0,
+        sunShotTimer: 0,
+        timer: 0,
+        maxDuration: 8.5,
+        absorbedDebris: [],
+        gravityRadius: 380,
+      },
+      slashes: [],
+      leftHand: { x: -50, y: 30, progress: 0 },
+      rightHand: { x: 50, y: 30, progress: 0 },
+      eyeState: 'glowing',
+      facing: 1,
+      summonExplosionTimer: 1.8,
+    };
+  }
+
+  private updateSantiscat(delta: number) {
+    if (!this.santiscat || this.stage !== 'santiscat_boss') return;
+    const s = this.santiscat;
+
+    s.floatOffset = Math.sin(this.stats.timeElapsed * 2.5) * 16;
+    if (s.summonExplosionTimer && s.summonExplosionTimer > 0) {
+      s.summonExplosionTimer -= delta;
+    }
+
+    // Direction facing player
+    s.facing = this.player.x < s.x ? -1 : 1;
+
+    // Movement: smooth floating around player
+    if (s.currentAttack !== 'black_hole_chase') {
+      const targetX = this.player.x + (s.facing === -1 ? 380 : -380);
+      const targetY = this.player.y - 80;
+      s.x += (targetX - s.x) * 0.025;
+      s.y += (targetY - s.y) * 0.025;
+    }
+
+    // Hand punch progress decay
+    if (s.leftHand.progress > 0) s.leftHand.progress = Math.max(0, s.leftHand.progress - delta * 3);
+    if (s.rightHand.progress > 0) s.rightHand.progress = Math.max(0, s.rightHand.progress - delta * 3);
+
+    // AI Attack Cycle
+    if (s.currentAttack === 'idle') {
+      s.attackCooldown -= delta;
+      if (s.attackCooldown <= 0) {
+        const attacks: SantiscatAttack[] = [
+          'sun_burst',
+          'oneshot_fireball',
+          'reality_slashes',
+          'sun_burst',
+          'oneshot_fireball',
+          'dimensional_warp',
+        ];
+        const nextAttack = attacks[Math.floor(Math.random() * attacks.length)];
+        this.triggerSantiscatAttack(nextAttack);
+      }
+    } else if (s.currentAttack === 'sun_burst') {
+      this.updateSantiscatSun(delta);
+    } else if (s.currentAttack === 'compress_black_hole') {
+      this.updateSantiscatCompress(delta);
+    } else if (s.currentAttack === 'black_hole_chase') {
+      this.updateSantiscatBlackHole(delta);
+    } else if (s.currentAttack === 'oneshot_fireball') {
+      this.updateSantiscatFireball(delta);
+    } else if (s.currentAttack === 'reality_slashes') {
+      this.updateSantiscatSlashes(delta);
+    } else if (s.currentAttack === 'dimensional_warp') {
+      this.updateSantiscatWarp(delta);
+    }
+  }
+
+  private triggerSantiscatAttack(attack: SantiscatAttack) {
+    if (!this.santiscat) return;
+    const s = this.santiscat;
+    s.currentAttack = attack;
+    s.attackTimer = 0;
+
+    if (attack === 'sun_burst') {
+      s.blackHole.active = true;
+      s.blackHole.phase = 'sun_charging';
+      s.blackHole.x = s.x;
+      s.blackHole.y = s.y - 120;
+      s.blackHole.sunShotsFired = 0;
+      s.blackHole.sunShotTimer = 0;
+      s.eyeState = 'glowing';
+    } else if (attack === 'oneshot_fireball') {
+      s.eyeState = 'menacing';
+      soundManager.playOneShotFireball();
+    } else if (attack === 'reality_slashes') {
+      s.eyeState = 'menacing';
+      // Generate 3 slashing fracture lines around player
+      s.slashes = [];
+      for (let i = 0; i < 3; i++) {
+        const ang = Math.random() * Math.PI;
+        const len = 420;
+        const cx = this.player.x + (Math.random() - 0.5) * 160;
+        const cy = this.player.y + (Math.random() - 0.5) * 160;
+        s.slashes.push({
+          id: `slash_${i}_${Date.now()}`,
+          x1: cx - Math.cos(ang) * (len / 2),
+          y1: cy - Math.sin(ang) * (len / 2),
+          x2: cx + Math.cos(ang) * (len / 2),
+          y2: cy + Math.sin(ang) * (len / 2),
+          phase: 'telegraph',
+          timer: 0,
+          maxTimer: 1.2,
+          width: 24,
+          damage: 65,
+        });
+      }
+    }
+  }
+
+  private updateSantiscatSun(delta: number) {
+    const s = this.santiscat!;
+    const bh = s.blackHole;
+    bh.x = s.x;
+    bh.y = s.y - 120;
+    bh.sunShotTimer += delta;
+
+    if (bh.sunShotTimer >= 0.72) {
+      bh.sunShotTimer = 0;
+      bh.sunShotsFired++;
+      soundManager.playSunBlast();
+      this.screenShake = 10;
+
+      // Launch celestial sun energy shot
+      const ang = Math.atan2(this.player.y - bh.y, this.player.x - bh.x);
+      const spd = 13;
+      this.projectiles.push({
+        id: Math.random().toString(),
+        type: 'santiscat_sun_shot',
+        x: bh.x,
+        y: bh.y,
+        vx: Math.cos(ang) * spd,
+        vy: Math.sin(ang) * spd,
+        radius: 16,
+        damage: 42,
+        duration: 0,
+        maxDuration: 4.5,
+        color: '#facc15',
+        glowColor: '#ea580c',
+        trail: [],
+      });
+
+      if (bh.sunShotsFired >= 5) {
+        // Transition: Santiscat compresses it into a black hole!
+        s.currentAttack = 'compress_black_hole';
+        bh.phase = 'compressing';
+        s.attackTimer = 0;
+      }
+    }
+  }
+
+  private updateSantiscatCompress(delta: number) {
+    const s = this.santiscat!;
+    s.attackTimer += delta;
+    s.leftHand.progress = Math.min(1.0, s.attackTimer / 0.8);
+    s.rightHand.progress = Math.min(1.0, s.attackTimer / 0.8);
+
+    if (s.attackTimer >= 1.2) {
+      soundManager.playBlackHoleCollapse();
+      this.screenShake = 24;
+      s.blackHole.phase = 'black_hole_active';
+      s.blackHole.radius = 45;
+      s.blackHole.timer = 0;
+      s.blackHole.absorbedDebris = [];
+      s.currentAttack = 'black_hole_chase';
+      s.attackTimer = 0;
+    }
+  }
+
+  private updateSantiscatBlackHole(delta: number) {
+    const s = this.santiscat!;
+    const bh = s.blackHole;
+    bh.timer += delta;
+
+    // Black Hole tracks player smoothly
+    const dx = this.player.x - bh.x;
+    const dy = this.player.y - bh.y;
+    const dist = Math.hypot(dx, dy) || 1;
+    const trackSpeed = 4.2;
+    bh.x += (dx / dist) * trackSpeed * delta * 60;
+    bh.y += (dy / dist) * trackSpeed * delta * 60;
+
+    // Gravitational suction on nearby obstacles & debris
+    this.obstacles.forEach(obs => {
+      const oDist = Math.hypot(obs.x + obs.width / 2 - bh.x, obs.y + obs.height / 2 - bh.y);
+      if (oDist < bh.gravityRadius) {
+        // Pull towards black hole
+        const pullStr = (1 - oDist / bh.gravityRadius) * 6.5;
+        obs.x += ((bh.x - (obs.x + obs.width / 2)) / (oDist || 1)) * pullStr;
+        obs.y += ((bh.y - (obs.y + obs.height / 2)) / (oDist || 1)) * pullStr;
+
+        // Absorbed if close enough
+        if (oDist < 60) {
+          bh.absorbedDebris.push({
+            id: obs.id,
+            angle: Math.random() * Math.PI * 2,
+            dist: 55 + Math.random() * 45,
+            speed: 4.5 + Math.random() * 3.5,
+            radius: 8 + Math.random() * 8,
+            color: obs.color,
+          });
+          obs.hp = -999; // mark consumed
+          soundManager.playPunch();
+        }
+      }
+    });
+    this.obstacles = this.obstacles.filter(o => o.hp > 0);
+
+    // Update orbiting absorbed debris & test collision with Catvalen!
+    bh.absorbedDebris.forEach(deb => {
+      deb.angle += deb.speed * delta;
+      const debX = bh.x + Math.cos(deb.angle) * deb.dist;
+      const debY = bh.y + Math.sin(deb.angle) * deb.dist;
+      const pDist = Math.hypot(this.player.x - debX, this.player.y - debY);
+      if (pDist < this.player.width * 0.45 + deb.radius) {
+        this.takePlayerDamage(28, 'collision');
+      }
+    });
+
+    // Check player contact with event horizon
+    if (dist < bh.radius + this.player.width * 0.35) {
+      if (!this.godMode && !this.player.isInvulnerable) {
+        this.stats.deathReason = 'black_hole';
+        this.takePlayerDamage(65 * delta, 'collision');
+      }
+    }
+
+    // Collapse after 8.5 seconds
+    if (bh.timer >= bh.maxDuration) {
+      soundManager.playExplosion();
+      this.screenShake = 28;
+      this.spawnHitParticles(bh.x, bh.y, '#ffffff', 40);
+      this.spawnHitParticles(bh.x, bh.y, '#a855f7', 35);
+      this.spawnRubble(bh.x, bh.y, '#6366f1', 25);
+      bh.active = false;
+      s.currentAttack = 'idle';
+      s.attackCooldown = 2.0;
+    }
+  }
+
+  private updateSantiscatFireball(delta: number) {
+    const s = this.santiscat!;
+    s.attackTimer += delta;
+
+    if (s.attackTimer >= 0.6) {
+      // Launch tiny ONE-SHOT fireball
+      const ang = Math.atan2(this.player.y - s.y, this.player.x - s.x);
+      const spd = 12;
+      this.projectiles.push({
+        id: Math.random().toString(),
+        type: 'santiscat_oneshot_fireball',
+        x: s.x + (s.facing === 1 ? 55 : -55),
+        y: s.y + 10,
+        vx: Math.cos(ang) * spd,
+        vy: Math.sin(ang) * spd,
+        radius: 9, // Small tiny fireball!
+        damage: 99999, // ONE-SHOT!
+        duration: 0,
+        maxDuration: 4.8,
+        color: '#ff003b',
+        glowColor: '#ef4444',
+        trail: [],
+      });
+
+      this.screenShake = 16;
+      s.currentAttack = 'idle';
+      s.attackCooldown = 2.4;
+    }
+  }
+
+  private updateSantiscatSlashes(delta: number) {
+    const s = this.santiscat!;
+    s.attackTimer += delta;
+
+    s.slashes.forEach(slash => {
+      slash.timer += delta;
+      if (slash.timer < 0.7) {
+        slash.phase = 'telegraph';
+      } else if (slash.timer < 0.95) {
+        if (slash.phase === 'telegraph') {
+          soundManager.playRealitySlash();
+          this.screenShake = 18;
+          // Check collision between player and line segment (x1, y1) to (x2, y2)
+          const px = this.player.x;
+          const py = this.player.y;
+          const ldx = slash.x2 - slash.x1;
+          const ldy = slash.y2 - slash.y1;
+          const lenSq = ldx * ldx + ldy * ldy || 1;
+          const t = Math.max(0, Math.min(1, ((px - slash.x1) * ldx + (py - slash.y1) * ldy) / lenSq));
+          const projX = slash.x1 + t * ldx;
+          const projY = slash.y1 + t * ldy;
+          const distToLine = Math.hypot(px - projX, py - projY);
+
+          if (distToLine < slash.width + this.player.width * 0.4) {
+            this.stats.deathReason = 'reality_tear';
+            this.takePlayerDamage(slash.damage, 'laser');
+          }
+        }
+        slash.phase = 'slash';
+      } else {
+        slash.phase = 'fade';
+      }
+    });
+
+    if (s.attackTimer >= 1.25) {
+      s.slashes = [];
+      s.currentAttack = 'idle';
+      s.attackCooldown = 1.9;
+    }
+  }
+
+  private updateSantiscatWarp(delta: number) {
+    const s = this.santiscat!;
+    soundManager.playTeleport();
+    this.spawnHitParticles(s.x, s.y, '#a855f7', 20);
+    s.x = Math.max(200, Math.min(3000, this.player.x + (Math.random() > 0.5 ? 420 : -420)));
+    s.y = Math.max(200, Math.min(2200, this.player.y + (Math.random() - 0.5) * 360));
+    this.spawnHitParticles(s.x, s.y, '#38bdf8', 20);
+    s.currentAttack = 'idle';
+    s.attackCooldown = 1.4;
+  }
+
+  public applyDamageToSantiscat(baseDmg: number, attackType: AttackType, hitX: number, hitY: number) {
+    if (!this.santiscat || this.stage !== 'santiscat_boss') return;
+    const s = this.santiscat;
+
+    const { damage, isBlackFlash } = this.rollBlackFlash(baseDmg, hitX, hitY);
+    s.hp = Math.max(0, s.hp - damage);
+    this.stats.santiscatDamageDealt = (this.stats.santiscatDamageDealt || 0) + damage;
+    this.stats.totalAttacksLanded++;
+    this.stats.score += damage * 3;
+
+    if (!isBlackFlash) {
+      this.damageNumbers.push({
+        id: Math.random().toString(),
+        text: `-${damage}`,
+        x: hitX,
+        y: hitY - 12,
+        vy: -1.4,
+        color: '#f43f5e',
+        isBlackFlash: false,
+        life: 0.9,
+        maxLife: 0.9,
+        scale: 1.15,
+      });
+    }
+
+    this.spawnHitParticles(hitX, hitY, isBlackFlash ? '#ff003b' : '#c084fc', 12);
+
+    if (s.hp <= 0) {
+      this.triggerVictory(true);
+    }
   }
 }

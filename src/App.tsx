@@ -6,6 +6,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { GameEngine } from './game/gameEngine';
 import { GameRenderer } from './game/renderer';
+import { DistortionShaderPipeline } from './game/distortionShader';
 import { soundManager } from './audio/soundManager';
 import { HUD } from './components/HUD';
 import { TouchControls } from './components/TouchControls';
@@ -27,6 +28,7 @@ export default function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const engineRef = useRef<GameEngine | null>(null);
   const rendererRef = useRef<GameRenderer | null>(null);
+  const distortionPipelineRef = useRef<DistortionShaderPipeline | null>(null);
 
   const [stage, setStage] = useState<GameStage>('start');
   const [isMuted, setIsMuted] = useState<boolean>(false);
@@ -37,24 +39,34 @@ export default function App() {
   const [adminUnlockAll, setAdminUnlockAllState] = useState<boolean>(() => getAdminUnlockAll());
   const [, setTick] = useState<number>(0); // force HUD re-render at smooth cadence
 
-  // Initialize Game Engine & Renderer
+  // Initialize Game Engine, Renderer & WebGL Distortion Pipeline
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    const ctx = canvas.getContext('2d', { alpha: false });
-    if (!ctx) return;
+    const displayCtx = canvas.getContext('2d', { alpha: false });
+    if (!displayCtx) return;
 
     const width = window.innerWidth;
     const height = window.innerHeight;
     canvas.width = width;
     canvas.height = height;
 
+    // Offscreen 2D canvas for pristine rendering before shader post-processing
+    const offscreenCanvas = document.createElement('canvas');
+    offscreenCanvas.width = width;
+    offscreenCanvas.height = height;
+    const offscreenCtx = offscreenCanvas.getContext('2d', { alpha: false });
+    if (!offscreenCtx) return;
+
     const engine = new GameEngine(width, height);
     engine.selectSkin(selectedSkin);
     engine.setNanovalenWins(nanovalenWins);
     engine.setAdminUnlockAll(adminUnlockAll);
-    const renderer = new GameRenderer(ctx, width, height);
+    const renderer = new GameRenderer(offscreenCtx, width, height);
+
+    const distortionPipeline = new DistortionShaderPipeline(width, height);
+    distortionPipelineRef.current = distortionPipeline;
 
     engineRef.current = engine;
     rendererRef.current = renderer;
@@ -72,6 +84,9 @@ export default function App() {
       const nh = window.innerHeight;
       canvas.width = nw;
       canvas.height = nh;
+      offscreenCanvas.width = nw;
+      offscreenCanvas.height = nh;
+      distortionPipeline.resize(nw, nh);
       engine.resize(nw, nh);
       renderer.resize(nw, nh);
     };
@@ -115,32 +130,49 @@ export default function App() {
       // Parallax background updates
       renderer.updateBackgrounds(delta, engine.stage, 3.0);
 
-      // Render all layers
-      ctx.save();
+      // Render all layers onto offscreen 2D canvas
+      offscreenCtx.save();
 
       // Screen Shake translation
       if (engine.screenShake > 0) {
         const shakeX = (Math.random() - 0.5) * engine.screenShake;
         const shakeY = (Math.random() - 0.5) * engine.screenShake;
-        ctx.translate(shakeX, shakeY);
+        offscreenCtx.translate(shakeX, shakeY);
       }
 
       const gameTime = currentTime / 1000;
+      const isLevel4 = engine.stage === 'distorted' || engine.stage === 'rhythm_summon' || engine.stage === 'santiscat_boss';
 
       if (engine.stage === 'cinematic_earth_destruction' && engine.cinematic) {
         // Render apocalyptic Earth Destruction cinematic
         renderer.drawEarthDestructionCinematic(engine.cinematic, gameTime);
       } else {
-        // 1. Background (City skyline or deep space nebula)
+        // 1. Background (City, Space nebula or Distorted void)
         renderer.drawBackground(engine.stage, gameTime);
 
-        // 2. Obstacles (Buildings or Asteroids)
+        // Apply Camera translation for Level 4 free-roaming world objects
+        offscreenCtx.save();
+        if (isLevel4) {
+          offscreenCtx.translate(-engine.camera.x, -engine.camera.y);
+        }
+
+        // Level 4 Altar, Glitches & Rhythm Minigame
+        if (isLevel4) {
+          const distToAltar = Math.hypot(engine.player.x - 1600, engine.player.y - 1200);
+          renderer.drawSpacetimeAltar(1600, 1200, gameTime, distToAltar);
+          renderer.drawRealityGlitches(engine.glitches, gameTime);
+          if (engine.stage === 'rhythm_summon' && engine.rhythmGame) {
+            renderer.drawRhythmGameOverlay(engine.rhythmGame, gameTime);
+          }
+        }
+
+        // 2. Obstacles (Buildings, Asteroids, Cosmic debris)
         renderer.drawObstacles(engine.obstacles, engine.stage, gameTime);
 
-        // 3. Projectiles (Fireballs, lightning, power bursts, boss meteors, drone lasers)
+        // 3. Projectiles (Fireballs, lightning, boss attacks, sun blasts, one-shot fireball)
         renderer.drawProjectiles(engine.projectiles, gameTime);
 
-        // 3.5 Boss Combat Drones (300 HP drones orbiting and shooting)
+        // 3.5 Boss Combat Drones (300 HP drones)
         if (engine.drones && engine.drones.length > 0) {
           renderer.drawDrones(engine.drones, gameTime);
         }
@@ -150,7 +182,12 @@ export default function App() {
           renderer.drawBoss(engine.boss, gameTime, engine.player.x, engine.player.y);
         }
 
-        // 5. Catvalen Player (Square cat from Image 1 with floating circular hands)
+        // 4.5 Boss Santiscat (Level 4 Cosmic Boss)
+        if (engine.santiscat && engine.stage === 'santiscat_boss') {
+          renderer.drawSantiscat(engine.santiscat, gameTime, engine.player.x, engine.player.y);
+        }
+
+        // 5. Catvalen Player
         renderer.drawPlayer(engine.player, gameTime);
 
         // 6. Black Flash critical lightning strikes & inverted flash
@@ -162,13 +199,51 @@ export default function App() {
         // 8. Damage numbers & floating text
         renderer.drawDamageNumbers(engine.damageNumbers);
 
-        // 9. Time stop chrono overlay (When Perro Marrón freezes time)
+        // 9. Time stop chrono overlay
         if (engine.player.timeStopActive) {
           renderer.drawTimeStopOverlay(engine.player.timeStopTimer, engine.player.timeStopMaxDuration, gameTime);
         }
+
+        offscreenCtx.restore(); // Restore camera translation
       }
 
-      ctx.restore();
+      offscreenCtx.restore(); // Restore screen shake
+
+      // --- Post-Processing: Procedural WebGL Distortion Shader Pipeline ---
+      // Distorts spacetime around black holes, reality slashes, and chromatic glitches
+      // leaves HTML/React UI 100% crisp and un-distorted on top
+      let blackHoleUniforms = undefined;
+      if (engine.santiscat?.blackHole.active && engine.santiscat.blackHole.phase === 'black_hole_active') {
+        blackHoleUniforms = {
+          active: true,
+          screenX: engine.santiscat.blackHole.x - engine.camera.x,
+          screenY: engine.santiscat.blackHole.y - engine.camera.y,
+          radius: engine.santiscat.blackHole.radius * 1.6,
+          mass: 2.2,
+        };
+      }
+
+      const slashUniforms = (engine.santiscat?.slashes || [])
+        .filter(s => s.phase === 'slash')
+        .map(s => ({
+          x1: s.x1 - engine.camera.x,
+          y1: s.y1 - engine.camera.y,
+          x2: s.x2 - engine.camera.x,
+          y2: s.y2 - engine.camera.y,
+          intensity: 1.0,
+        }));
+
+      let glitchStrength = 0;
+      if (isLevel4) {
+        glitchStrength = 0.012 + (engine.screenShake > 0 ? 0.04 : 0);
+      }
+
+      if (distortionPipeline.isAvailable() && (blackHoleUniforms?.active || slashUniforms.length > 0 || isLevel4)) {
+        distortionPipeline.render(offscreenCanvas, gameTime, blackHoleUniforms, glitchStrength, slashUniforms);
+        displayCtx.drawImage(distortionPipeline.getCanvas(), 0, 0);
+      } else {
+        displayCtx.drawImage(offscreenCanvas, 0, 0);
+      }
 
       // Sync stage state if changed internally
       if (engine.stage !== stage && (engine.stage === 'gameover' || engine.stage === 'victory' || engine.stage === 'cinematic_earth_destruction')) {
@@ -266,13 +341,10 @@ export default function App() {
     setStage('boss');
   }, []);
 
-  const [nextLevelNotice, setNextLevelNotice] = useState<string | null>(null);
-
   const handleNextLevel = useCallback(() => {
-    setNextLevelNotice('🚀 ¡Siguiente Nivel preparado! Listo para que me indiques qué deseas implementar a continuación.');
-    setTimeout(() => {
-      setNextLevelNotice(null);
-    }, 4500);
+    if (!engineRef.current) return;
+    engineRef.current.startStage('distorted');
+    setStage('distorted');
   }, []);
 
   const handleToggleMute = useCallback(() => {
@@ -345,18 +417,12 @@ export default function App() {
       {stage === 'victory' && engineRef.current && (
         <VictoryModal
           stats={engineRef.current.stats}
+          isSantiscatDefeated={(engineRef.current.stats.santiscatWins || 0) > 0 || (engineRef.current.stats.santiscatDamageDealt || 0) > 0}
           onPlayAgain={handleStartGame}
           onRematchBoss={handleRematchBoss}
           onMainMenu={handleReturnToMenu}
           onNextLevel={handleNextLevel}
         />
-      )}
-
-      {/* Siguiente Nivel Toast Notice */}
-      {nextLevelNotice && (
-        <div className="fixed top-8 left-1/2 -translate-x-1/2 z-50 bg-gradient-to-r from-cyan-600 to-blue-600 text-white px-6 py-3.5 rounded-2xl shadow-2xl border border-cyan-300 font-extrabold text-sm flex items-center gap-3 animate-bounce">
-          <span>{nextLevelNotice}</span>
-        </div>
       )}
 
       {/* Game Over Screen */}

@@ -724,7 +724,7 @@ class SoundManager {
     return this.hasCustomTrack('city');
   }
 
-  public playMusic(track: 'city' | 'space' | 'boss' | 'none') {
+  public playMusic(track: 'city' | 'space' | 'boss' | 'distorted' | 'santiscat' | 'none') {
     if (this.currentTrack === track) return;
     this.currentTrack = track;
     this.stopMusic();
@@ -744,7 +744,7 @@ class SoundManager {
           }
           elem.volume = this.isMuted ? 0 : 0.45;
           elem.currentTime = 0;
-          elem.play().catch(e => {
+          elem.play().catch((e: unknown) => {
             console.warn(`Custom audio playback for ${track} postponed:`, e);
           });
           return;
@@ -1209,6 +1209,206 @@ class SoundManager {
     gain.connect(this.sfxGain);
     osc.start(now);
     osc.stop(now + 0.14);
+  }
+
+  // --- Level 4: Rhythm Minigame & Santiscat SFX ---
+
+  public playRhythmBeat(type: 'kick' | 'snare' | 'hihat') {
+    if (this.isMuted) return;
+    this.initContext();
+    if (!this.ctx || !this.sfxGain) return;
+    const now = this.ctx.currentTime;
+
+    if (type === 'kick') {
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(150, now);
+      osc.frequency.exponentialRampToValueAtTime(35, now + 0.15);
+      gain.gain.setValueAtTime(0.7, now);
+      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.16);
+      osc.connect(gain);
+      gain.connect(this.sfxGain);
+      osc.start(now);
+      osc.stop(now + 0.17);
+    } else if (type === 'snare') {
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(260, now);
+      osc.frequency.exponentialRampToValueAtTime(90, now + 0.12);
+      gain.gain.setValueAtTime(0.5, now);
+      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.13);
+      osc.connect(gain);
+      gain.connect(this.sfxGain);
+      osc.start(now);
+      osc.stop(now + 0.14);
+    } else {
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.type = 'square';
+      osc.frequency.setValueAtTime(9000, now);
+      gain.gain.setValueAtTime(0.12, now);
+      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.04);
+      osc.connect(gain);
+      gain.connect(this.sfxGain);
+      osc.start(now);
+      osc.stop(now + 0.05);
+    }
+  }
+
+  public playRhythmHit(rating: 'perfect' | 'great' | 'miss' = 'great') {
+    if (this.isMuted) return;
+    this.initContext();
+    if (!this.ctx || !this.sfxGain) return;
+    const now = this.ctx.currentTime;
+
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+
+    if (rating === 'perfect') {
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(587.33, now); // D5
+      osc.frequency.setValueAtTime(880.0, now + 0.06); // A5
+      gain.gain.setValueAtTime(0.5, now);
+      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.22);
+    } else if (rating === 'great') {
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(440, now); // A4
+      gain.gain.setValueAtTime(0.35, now);
+      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.15);
+    } else {
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(130, now);
+      osc.frequency.linearRampToValueAtTime(70, now + 0.14);
+      gain.gain.setValueAtTime(0.3, now);
+      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.15);
+    }
+
+    osc.connect(gain);
+    gain.connect(this.sfxGain);
+    osc.start(now);
+    osc.stop(now + (rating === 'perfect' ? 0.24 : 0.16));
+  }
+
+  public playSantiscatSummon() {
+    if (this.isMuted) return;
+    this.initContext();
+    if (!this.ctx || !this.sfxGain) return;
+    const now = this.ctx.currentTime;
+
+    // Colossal dimension-shattering shockwave
+    const osc1 = this.ctx.createOscillator();
+    const osc2 = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+
+    osc1.type = 'sawtooth';
+    osc1.frequency.setValueAtTime(60, now);
+    osc1.frequency.exponentialRampToValueAtTime(600, now + 0.4);
+    osc1.frequency.exponentialRampToValueAtTime(40, now + 1.6);
+
+    osc2.type = 'square';
+    osc2.frequency.setValueAtTime(120, now);
+    osc2.frequency.linearRampToValueAtTime(30, now + 1.8);
+
+    gain.gain.setValueAtTime(0.9, now);
+    gain.gain.exponentialRampToValueAtTime(0.01, now + 2.0);
+
+    osc1.connect(gain);
+    osc2.connect(gain);
+    gain.connect(this.sfxGain);
+    osc1.start(now);
+    osc2.start(now);
+    osc1.stop(now + 2.0);
+    osc2.stop(now + 2.0);
+  }
+
+  public playSunBlast() {
+    if (this.isMuted) return;
+    this.initContext();
+    if (!this.ctx || !this.sfxGain) return;
+    const now = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(380, now);
+    osc.frequency.exponentialRampToValueAtTime(950, now + 0.18);
+    gain.gain.setValueAtTime(0.45, now);
+    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.25);
+    osc.connect(gain);
+    gain.connect(this.sfxGain);
+    osc.start(now);
+    osc.stop(now + 0.26);
+  }
+
+  public playBlackHoleCollapse() {
+    if (this.isMuted) return;
+    this.initContext();
+    if (!this.ctx || !this.sfxGain) return;
+    const now = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    const oscSub = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(1400, now);
+    osc.frequency.exponentialRampToValueAtTime(45, now + 0.8);
+
+    oscSub.type = 'sine';
+    oscSub.frequency.setValueAtTime(55, now);
+    oscSub.frequency.linearRampToValueAtTime(25, now + 1.1);
+
+    gain.gain.setValueAtTime(0.85, now);
+    gain.gain.exponentialRampToValueAtTime(0.01, now + 1.2);
+
+    osc.connect(gain);
+    oscSub.connect(gain);
+    gain.connect(this.sfxGain);
+    osc.start(now);
+    oscSub.start(now);
+    osc.stop(now + 1.2);
+    oscSub.stop(now + 1.2);
+  }
+
+  public playOneShotFireball() {
+    if (this.isMuted) return;
+    this.initContext();
+    if (!this.ctx || !this.sfxGain) return;
+    const now = this.ctx.currentTime;
+
+    // High pitched whistle of impending instant doom
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(1800, now);
+    osc.frequency.exponentialRampToValueAtTime(3200, now + 0.15);
+    osc.frequency.exponentialRampToValueAtTime(1200, now + 0.4);
+
+    gain.gain.setValueAtTime(0.65, now);
+    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.45);
+
+    osc.connect(gain);
+    gain.connect(this.sfxGain);
+    osc.start(now);
+    osc.stop(now + 0.46);
+  }
+
+  public playRealitySlash() {
+    if (this.isMuted) return;
+    this.initContext();
+    if (!this.ctx || !this.sfxGain) return;
+    const now = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(1600, now);
+    osc.frequency.exponentialRampToValueAtTime(110, now + 0.22);
+    gain.gain.setValueAtTime(0.6, now);
+    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.25);
+    osc.connect(gain);
+    gain.connect(this.sfxGain);
+    osc.start(now);
+    osc.stop(now + 0.26);
   }
 
   public stopAll() {

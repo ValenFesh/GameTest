@@ -1,10 +1,11 @@
 import React, { useEffect } from 'react';
 import confetti from 'canvas-confetti';
 import { GameStats } from '../types/game';
-import { Trophy, RotateCcw, Zap, Building2, Flame, ShieldAlert, Home } from 'lucide-react';
+import { Trophy, RotateCcw, Zap, Building2, Flame, ShieldAlert, Home, Sparkles } from 'lucide-react';
 
 interface VictoryModalProps {
   stats: GameStats;
+  isSantiscatDefeated?: boolean;
   onPlayAgain: () => void;
   onRematchBoss: () => void;
   onMainMenu?: () => void;
@@ -13,6 +14,7 @@ interface VictoryModalProps {
 
 export const VictoryModal: React.FC<VictoryModalProps> = ({
   stats,
+  isSantiscatDefeated,
   onPlayAgain,
   onRematchBoss,
   onMainMenu,
@@ -73,10 +75,12 @@ export const VictoryModal: React.FC<VictoryModalProps> = ({
 
         {/* Victory Title required by prompt: "Ganaste!" */}
         <h1 className="text-4xl md:text-5xl font-black font-display text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 via-teal-300 to-green-400 tracking-wider mb-1">
-          ¡Ganaste!
+          {isSantiscatDefeated ? '¡SANTISCAT DERROTADO!' : '¡Ganaste!'}
         </h1>
         <p className="text-neutral-300 text-sm mb-5 font-game">
-          ¡Catvalen destruyó los edificios, cruzó el cosmos y derrotó a Nanovalen!
+          {isSantiscatDefeated
+            ? '¡Has sobrevivido al colapso del agujero negro y restaurado la estabilidad de la realidad!'
+            : '¡Catvalen destruyó los edificios, cruzó el cosmos y derrotó a Nanovalen!'}
         </p>
 
         {/* Stats Grid */}
