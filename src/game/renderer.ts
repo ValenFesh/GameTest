@@ -11,9 +11,12 @@ import {
   Player,
   Projectile,
   RealityGlitch,
+  RealitySlash,
   RhythmGameState,
   SantiscatBoss,
+  SantiscatDefeatCinematicState,
 } from '../types/game';
+import { MultiplayerPlayer } from '../types/multiplayer';
 
 export class GameRenderer {
   private ctx: CanvasRenderingContext2D;
@@ -22,6 +25,10 @@ export class GameRenderer {
   private stars: { x: number; y: number; size: number; speed: number; alpha: number }[] = [];
   private cityBuildings: { x: number; width: number; height: number; color: string; windows: boolean[][] }[] = [];
   private santiscatImg: HTMLImageElement | null = null;
+  private sukunacatImg: HTMLImageElement | null = null;
+  private gojocatImg: HTMLImageElement | null = null;
+  private shrineImg: HTMLImageElement | null = null;
+  private soulImages: Record<string, HTMLImageElement> = {};
 
   constructor(ctx: CanvasRenderingContext2D, width: number, height: number) {
     this.ctx = ctx;
@@ -32,6 +39,36 @@ export class GameRenderer {
     if (typeof Image !== 'undefined') {
       this.santiscatImg = new Image();
       this.santiscatImg.src = '/assets/aistudio/santiscat_18f093e7.png';
+
+      this.sukunacatImg = new Image();
+      this.sukunacatImg.src = '/assets/aistudio/sukunacat_72a49d1d.png';
+
+      this.gojocatImg = new Image();
+      this.gojocatImg.src = '/assets/aistudio/gojocat_296859ad.png';
+
+      this.shrineImg = new Image();
+      this.shrineImg.src = '/assets/aistudio/image_c53ec466.png';
+
+      // Preload the 12 Human Souls
+      const soulPaths: Record<string, string> = {
+        tenacidad: '/assets/aistudio/Tenacidad_ca49aeec.png',
+        integridad: '/assets/aistudio/Integridad_ca808672.png',
+        justicia: '/assets/aistudio/Justicia_3626915d.png',
+        valentia: '/assets/aistudio/Valentia_7a5ea704.png',
+        simpatia: '/assets/aistudio/Simpatia_1f6b6d79.png',
+        rectitud: '/assets/aistudio/Rectitud_1721dbcd.png',
+        determinacion: '/assets/aistudio/Determinacion_b541db8d.png',
+        paciencia: '/assets/aistudio/Paciencia_227b909a.png',
+        perseverancia: '/assets/aistudio/Perseverancia_74b3517e.png',
+        amabilidad: '/assets/aistudio/Amabilidad_2df30abc.png',
+        coraje: '/assets/aistudio/Coraje_e2838b81.png',
+        entendimiento: '/assets/aistudio/Entendimiento_eb7ff49c.png',
+      };
+      for (const [id, path] of Object.entries(soulPaths)) {
+        const img = new Image();
+        img.src = path;
+        this.soulImages[id] = img;
+      }
     }
   }
 
@@ -187,6 +224,10 @@ export class GameRenderer {
       }
       ctx.restore();
 
+    } else if (stage === 'santiscat_boss_wormhole') {
+      this.drawWormholeCanvasBackground(gameTime);
+    } else if (stage === 'santiscat_boss_universe') {
+      this.drawAlternateUniverseBackground(gameTime);
     } else if (stage === 'distorted' || stage === 'rhythm_summon' || stage === 'santiscat_boss') {
       this.drawDistortedBackground(gameTime);
     } else {
@@ -244,6 +285,11 @@ export class GameRenderer {
     // Subtle floating bob
     const bob = Math.sin(time * 6) * 3;
     ctx.translate(0, bob);
+
+    // Prompt: "que catvalen pueda voltearse para tirar ataques hacia la izquierda"
+    if (player.facing === -1) {
+      ctx.scale(-1, 1);
+    }
 
     // Invulnerability blink
     if (player.isInvulnerable && Math.floor(time * 20) % 2 === 0) {
@@ -701,6 +747,131 @@ export class GameRenderer {
       }
       ctx.restore();
     }
+
+    ctx.restore();
+  }
+
+  public drawRemotePlayer(remotePlayer: MultiplayerPlayer, time: number, isBeingSpectated: boolean = false) {
+    const isDead = remotePlayer.isAlive === false || (typeof remotePlayer.hp === 'number' && remotePlayer.hp <= 0);
+    if (isDead) {
+      // Draw ghost/spectator tombstone
+      const ctx = this.ctx;
+      ctx.save();
+      ctx.translate(remotePlayer.x, remotePlayer.y);
+      ctx.globalAlpha = 0.45;
+      ctx.font = 'bold 22px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('👻', 0, 0);
+      ctx.font = '900 11px Orbitron, sans-serif';
+      ctx.fillStyle = '#f87171';
+      ctx.fillText(`[${remotePlayer.name}] (CAÍDO)`, 0, 20);
+      ctx.restore();
+      return;
+    }
+
+    // Synthesize a Player object compatible with drawPlayer
+    const syntheticPlayer: Player = {
+      x: remotePlayer.x,
+      y: remotePlayer.y,
+      vx: remotePlayer.vx,
+      vy: remotePlayer.vy,
+      width: 58,
+      height: 58,
+      hp: remotePlayer.hp,
+      maxHp: remotePlayer.maxHp,
+      shieldActive: remotePlayer.shieldActive,
+      shieldTimer: 2.0,
+      shieldMaxDuration: 2.8,
+      shieldCooldown: 0,
+      shieldMaxCooldown: 7.5,
+      shieldColor: remotePlayer.shieldColor || '#10b981',
+      leftHand: { x: -32, y: 14, punchProgress: 0 },
+      rightHand: { x: 32, y: 14, punchProgress: 0 },
+      punchCooldown: 0,
+      punchMaxCooldown: 0.75,
+      fireballCooldown: 0,
+      fireballMaxCooldown: 2.2,
+      lightningCooldown: 0,
+      lightningMaxCooldown: 3.4,
+      powerBurstCooldown: 0,
+      powerBurstMaxCooldown: 2.6,
+      healsRemaining: 10,
+      maxHeals: 10,
+      healCooldown: 0,
+      isInvulnerable: false,
+      invulnerableTimer: 0,
+      facing: (remotePlayer.facing === -1 ? -1 : 1) as (-1 | 1),
+      eyeState: (remotePlayer.eyeState as any) || 'normal',
+      animationTime: remotePlayer.animationTime || time,
+      skin: remotePlayer.skin || 'catvalen',
+      special1Cooldown: 0,
+      special1MaxCooldown: 6.0,
+      special2Cooldown: 0,
+      special2MaxCooldown: 4.0,
+      mindControlActive: false,
+      mindControlTimer: 0,
+      greenBeamCharging: Boolean(remotePlayer.greenBeamCharging),
+      greenBeamChargeTimer: 2.0,
+      greenBeamChargeMax: 4.0,
+      greenBeamFiring: Boolean(remotePlayer.greenBeamFiring),
+      greenBeamFiringTimer: 2.0,
+      healRegenAccumulator: 0,
+      timeStopActive: Boolean(remotePlayer.timeStopActive),
+      timeStopTimer: 3.0,
+      timeStopMaxDuration: 4.5,
+      holdingShield: Boolean(remotePlayer.holdingShield),
+    };
+
+    // Draw the teammate character body, skin, ears, paws, and active abilities
+    this.drawPlayer(syntheticPlayer, time);
+
+    // Draw Teammate Overhead HUD (Name, Health Bar, Device Icon & Spectating Crown)
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.translate(remotePlayer.x, remotePlayer.y - 48);
+
+    // Spectator highlight indicator
+    if (isBeingSpectated) {
+      ctx.fillStyle = '#facc15';
+      ctx.font = '900 11px Orbitron, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.shadowColor = '#eab308';
+      ctx.shadowBlur = 10;
+      ctx.fillText('★ ESPECTANDO ★', 0, -22);
+      ctx.shadowBlur = 0;
+    }
+
+    // Name tag badge
+    const deviceIcon = remotePlayer.device === 'mobile' ? '📱' : '💻';
+    const tagText = `${deviceIcon} ${remotePlayer.name}`;
+    ctx.font = 'bold 11px Fredoka, sans-serif';
+    const textW = ctx.measureText(tagText).width;
+    const badgeW = Math.max(54, textW + 14);
+
+    ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
+    ctx.strokeStyle = isBeingSpectated ? '#facc15' : 'rgba(56, 189, 248, 0.6)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.roundRect(-badgeW / 2, -18, badgeW, 16, 8);
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.fillStyle = '#ffffff';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(tagText, 0, -10);
+
+    // Mini Health Bar
+    const barW = 44;
+    const barH = 5;
+    const hpRatio = Math.max(0, Math.min(1, remotePlayer.hp / remotePlayer.maxHp));
+    ctx.fillStyle = '#0f172a';
+    ctx.fillRect(-barW / 2, 2, barW, barH);
+    ctx.fillStyle = hpRatio > 0.5 ? '#22c55e' : hpRatio > 0.25 ? '#f59e0b' : '#ef4444';
+    ctx.fillRect(-barW / 2, 2, barW * hpRatio, barH);
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+    ctx.lineWidth = 0.8;
+    ctx.strokeRect(-barW / 2, 2, barW, barH);
 
     ctx.restore();
   }
@@ -1660,44 +1831,128 @@ export class GameRenderer {
         }
 
       } else if (p.type === 'player_energy_anvil') {
-        // Yunque de Energía Cósmica (Perro Rubio)
-        ctx.shadowColor = '#facc15';
-        ctx.shadowBlur = 28;
+        // Yunque de Energía Cósmica (Dog Fermin) - Massive, visible, with celestial warning beam & ground reticle
+        // 1. Celestial Pillar / Beam from the sky
+        ctx.save();
+        const beamGrad = ctx.createLinearGradient(0, -380, 0, 0);
+        beamGrad.addColorStop(0, 'rgba(250, 204, 21, 0)');
+        beamGrad.addColorStop(0.6, 'rgba(250, 204, 21, 0.35)');
+        beamGrad.addColorStop(1, 'rgba(255, 255, 255, 0.85)');
+        ctx.fillStyle = beamGrad;
+        ctx.fillRect(-32, -450, 64, 450);
 
-        // Anvil Shape
-        ctx.fillStyle = '#facc15';
+        // Core light beam streak
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.75)';
+        ctx.fillRect(-10, -450, 20, 450);
+        ctx.restore();
+
+        // 2. Ground impact target reticle
+        if (p.targetY !== undefined) {
+          const relGroundY = p.targetY - p.y;
+          if (relGroundY > 0) {
+            ctx.save();
+            ctx.strokeStyle = '#facc15';
+            ctx.lineWidth = 3;
+            ctx.shadowColor = '#facc15';
+            ctx.shadowBlur = 20;
+
+            const pulseRing = 52 + Math.sin(time * 14) * 6;
+            ctx.beginPath();
+            ctx.ellipse(0, relGroundY, pulseRing, pulseRing * 0.36, 0, 0, Math.PI * 2);
+            ctx.stroke();
+
+            // Inner danger crosshair
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(-pulseRing * 0.8, relGroundY);
+            ctx.lineTo(pulseRing * 0.8, relGroundY);
+            ctx.moveTo(0, relGroundY - pulseRing * 0.3);
+            ctx.lineTo(0, relGroundY + pulseRing * 0.3);
+            ctx.stroke();
+
+            // Ground warning text
+            ctx.fillStyle = '#fef08a';
+            ctx.font = '900 11px Orbitron, sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('⚠️ ZONA DE IMPACTO', 0, relGroundY + 22);
+            ctx.restore();
+          }
+        }
+
+        // 3. Colossal Golden Anvil
+        ctx.save();
+        ctx.scale(1.5, 1.5);
+        ctx.shadowColor = '#facc15';
+        ctx.shadowBlur = 35;
+
+        // Upward speed lines (showing heavy downward velocity)
+        ctx.strokeStyle = 'rgba(250, 204, 21, 0.7)';
+        ctx.lineWidth = 2;
+        [-24, -10, 10, 24].forEach((sx, idx) => {
+          ctx.beginPath();
+          ctx.moveTo(sx, -25);
+          ctx.lineTo(sx, -55 - (idx % 2) * 20);
+          ctx.stroke();
+        });
+
+        // Golden metallic gradient for body
+        const anvilGrad = ctx.createLinearGradient(-30, -20, 30, 24);
+        anvilGrad.addColorStop(0, '#ffffff');
+        anvilGrad.addColorStop(0.3, '#fde047');
+        anvilGrad.addColorStop(0.7, '#eab308');
+        anvilGrad.addColorStop(1, '#92400e');
+        ctx.fillStyle = anvilGrad;
         ctx.strokeStyle = '#ca8a04';
         ctx.lineWidth = 4;
+
         ctx.beginPath();
-        // Top flat head of anvil
-        ctx.moveTo(-28, -18);
-        ctx.lineTo(28, -18);
-        ctx.lineTo(24, -4);
-        ctx.lineTo(10, 4);
-        ctx.lineTo(18, 20);
-        ctx.lineTo(-18, 20);
-        ctx.lineTo(-10, 4);
-        ctx.lineTo(-24, -4);
+        // Top flat striking plate
+        ctx.moveTo(-32, -20);
+        ctx.lineTo(32, -20);
+        ctx.lineTo(26, -5);
+        ctx.lineTo(12, 5);
+        ctx.lineTo(20, 22);
+        ctx.lineTo(-20, 22);
+        ctx.lineTo(-12, 5);
+        ctx.lineTo(-26, -5);
         ctx.closePath();
         ctx.fill();
         ctx.stroke();
 
-        // Anvil horn point
+        // Anvil horn (pointy nose)
         ctx.beginPath();
-        ctx.moveTo(28, -18);
-        ctx.lineTo(44, -14);
-        ctx.lineTo(24, -4);
+        ctx.moveTo(32, -20);
+        ctx.lineTo(50, -15);
+        ctx.lineTo(26, -5);
         ctx.closePath();
         ctx.fill();
         ctx.stroke();
 
-        // Energy circuit lines
+        // Glowing runic engravings
         ctx.strokeStyle = '#ffffff';
-        ctx.lineWidth = 2;
+        ctx.lineWidth = 2.5;
+        ctx.shadowColor = '#ffffff';
+        ctx.shadowBlur = 10;
         ctx.beginPath();
-        ctx.moveTo(-16, -10);
-        ctx.lineTo(16, -10);
+        ctx.moveTo(-18, -12);
+        ctx.lineTo(18, -12);
+        ctx.moveTo(-6, -12);
+        ctx.lineTo(0, 12);
+        ctx.moveTo(6, -12);
+        ctx.lineTo(0, 12);
         ctx.stroke();
+
+        // Arcane spark rings
+        ctx.fillStyle = '#ffffff';
+        for (let sp = 0; sp < 4; sp++) {
+          const spAng = time * 12 + (sp * Math.PI) / 2;
+          ctx.beginPath();
+          ctx.arc(Math.cos(spAng) * 28, Math.sin(spAng) * 16, 2.5, 0, Math.PI * 2);
+          ctx.fill();
+        }
+
+        ctx.restore();
 
       } else if (p.type === 'player_energy_blade') {
         // Espadas de Luz Construida (Perro Rubio)
@@ -2586,15 +2841,23 @@ export class GameRenderer {
     ctx.save();
     const catY = boss.y + boss.floatOffset;
 
+    // 0. Dark Shadowy Portal & Human Souls (when absorbing souls or in Phase 2)
+    if (boss.portalScale > 0) {
+      this.drawDarkShadowPortal(boss, catY, gameTime);
+    }
+    if (boss.souls && boss.souls.length > 0) {
+      this.drawHumanSouls(boss, catY, gameTime);
+    }
+
     // 1. Cosmic Deity Aura behind Santiscat
     const auraPulse = 1.0 + 0.12 * Math.sin(gameTime * 3);
-    const auraGrad = ctx.createRadialGradient(boss.x, catY, 30, boss.x, catY, 140 * auraPulse);
-    auraGrad.addColorStop(0, 'rgba(168, 85, 247, 0.45)');
-    auraGrad.addColorStop(0.5, 'rgba(56, 189, 248, 0.25)');
+    const auraGrad = ctx.createRadialGradient(boss.x, catY, 30, boss.x, catY, (boss.bossPhase >= 2 ? 180 : 140) * auraPulse);
+    auraGrad.addColorStop(0, boss.bossPhase >= 2 ? 'rgba(236, 72, 153, 0.55)' : 'rgba(168, 85, 247, 0.45)');
+    auraGrad.addColorStop(0.5, boss.bossPhase >= 2 ? 'rgba(6, 182, 212, 0.35)' : 'rgba(56, 189, 248, 0.25)');
     auraGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
     ctx.fillStyle = auraGrad;
     ctx.beginPath();
-    ctx.arc(boss.x, catY, 140 * auraPulse, 0, Math.PI * 2);
+    ctx.arc(boss.x, catY, (boss.bossPhase >= 2 ? 180 : 140) * auraPulse, 0, Math.PI * 2);
     ctx.fill();
 
     // 2. Santiscat Body Sprite (Using loaded asset /assets/aistudio/santiscat_18f093e7.png)
@@ -2604,14 +2867,14 @@ export class GameRenderer {
       ctx.scale(-1, 1);
     }
 
-    const drawW = boss.width;
-    const drawH = boss.height;
+    const drawW = boss.width * (boss.bossPhase >= 2 ? 1.15 : 1.0);
+    const drawH = boss.height * (boss.bossPhase >= 2 ? 1.15 : 1.0);
 
     if (this.santiscatImg && this.santiscatImg.complete && this.santiscatImg.naturalWidth > 0) {
       ctx.drawImage(this.santiscatImg, -drawW / 2, -drawH / 2, drawW, drawH);
     } else {
       // Fallback procedural square cat matching the doodle
-      ctx.fillStyle = '#9ca3af';
+      ctx.fillStyle = boss.bossPhase >= 2 ? '#e2e8f0' : '#9ca3af';
       ctx.strokeStyle = '#000000';
       ctx.lineWidth = 4;
       ctx.beginPath();
@@ -2650,13 +2913,13 @@ export class GameRenderer {
     }
 
     // Glowing Eyes Overlay based on eyeState
-    if (boss.eyeState === 'glowing') {
-      ctx.fillStyle = '#facc15';
-      ctx.shadowColor = '#eab308';
-      ctx.shadowBlur = 14;
+    if (boss.eyeState === 'glowing' || boss.bossPhase >= 2) {
+      ctx.fillStyle = boss.bossPhase >= 2 ? '#ec4899' : '#facc15';
+      ctx.shadowColor = boss.bossPhase >= 2 ? '#db2777' : '#eab308';
+      ctx.shadowBlur = 18;
       ctx.beginPath();
-      ctx.arc(-25, -20, 5, 0, Math.PI * 2);
-      ctx.arc(25, -20, 5, 0, Math.PI * 2);
+      ctx.arc(-25, -20, 6, 0, Math.PI * 2);
+      ctx.arc(25, -20, 6, 0, Math.PI * 2);
       ctx.fill();
       ctx.shadowBlur = 0;
     } else if (boss.eyeState === 'menacing') {
@@ -2691,7 +2954,7 @@ export class GameRenderer {
     ctx.restore(); // restore cat transform
 
     // 3. Sun Invocation & Black Hole Relativistic Accretion System
-    if (boss.blackHole.active) {
+    if (boss.blackHole.active || boss.currentAttack === 'black_hole_chase' || boss.currentAttack === 'compress_black_hole' || boss.currentAttack === 'sun_burst') {
       this.drawSunAndBlackHole(boss.blackHole, gameTime);
     }
 
@@ -2699,6 +2962,28 @@ export class GameRenderer {
     if (boss.slashes && boss.slashes.length > 0) {
       this.drawRealitySlashes(boss.slashes, gameTime);
     }
+
+    // 5. Malevolent Shrine (Fukuma Mizushi)
+    if (boss.shrine && boss.shrine.active) {
+      this.drawMalevolentShrine(boss.shrine, gameTime);
+    }
+
+    // 6. Jujutsu Summons: Sukunacat & Gojocat (Phase 1)
+    if (boss.jujutsuSummons && boss.jujutsuSummons.length > 0 && boss.bossPhase === 1) {
+      this.drawJujutsuSummons(boss.jujutsuSummons, gameTime, boss.gojoTechniques?.purple?.fusionProgress);
+    }
+
+    // 7. Gojo Techniques: Blue, Red & Hollow Purple (Phase 1)
+    if (boss.gojoTechniques && boss.bossPhase === 1) {
+      this.drawGojoTechniques(boss.gojoTechniques, gameTime);
+    }
+
+    // 8. Phase 2 & 2.5 Attacks: Rainbow Energy Blast, Galaxies, Stars & Supernovas, Omega Flowey Save/Load, Refuse to Die
+    this.drawRainbowBlast(boss, gameTime);
+    this.drawGalaxies(boss, gameTime);
+    this.drawGiantStarsAndSupernovas(boss, gameTime);
+    this.drawOmegaSaveBox(boss, gameTime);
+    this.drawRefusedToDieSequence(boss, gameTime);
 
     ctx.restore();
   }
@@ -2743,65 +3028,155 @@ export class GameRenderer {
       ctx.arc(0, 0, r * 0.85, 0, Math.PI * 2);
       ctx.fill();
 
-    } else if (bh.phase === 'black_hole_active') {
-      // Relativistic Black Hole with Accretion Disk & Einstein Ring
-      const r = bh.radius;
+    } else {
+      // Relativistic Black Hole with Accretion Disk, Gravity Distortion Field, Photon Sphere & Hazard HUD
+      const r = bh.radius || 48;
+      const gravRadius = bh.gravityRadius || 380;
 
-      // Gravitational lensing outer warp halo
-      const lensGrad = ctx.createRadialGradient(0, 0, r * 0.9, 0, 0, r * 3.2);
-      lensGrad.addColorStop(0, 'rgba(249, 115, 22, 0.55)');
-      lensGrad.addColorStop(0.4, 'rgba(168, 85, 247, 0.35)');
-      lensGrad.addColorStop(0.8, 'rgba(56, 189, 248, 0.15)');
+      // 1. Gravitational Attraction Field (Pulsing hazard boundary showing the suction danger area)
+      ctx.save();
+      const gravPulse = 0.5 + 0.3 * Math.sin(gameTime * 4);
+      ctx.strokeStyle = `rgba(249, 115, 22, ${0.35 + 0.3 * gravPulse})`;
+      ctx.lineWidth = 3;
+      ctx.setLineDash([14, 8]);
+      ctx.lineDashOffset = -gameTime * 50;
+      ctx.beginPath();
+      ctx.arc(0, 0, gravRadius, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      // Inward swirling gravitational suction rays
+      for (let s = 0; s < 12; s++) {
+        const rayAngle = (s * Math.PI * 2) / 12 + gameTime * 2.2;
+        const streamProgress = ((gameTime * 1.8 + s * 0.15) % 1.0);
+        const startDist = gravRadius * (1.0 - streamProgress * 0.7);
+        const endDist = Math.max(r * 1.5, startDist - 60);
+        ctx.strokeStyle = s % 2 === 0 ? 'rgba(56, 189, 248, 0.55)' : 'rgba(249, 115, 22, 0.6)';
+        ctx.lineWidth = 2.5;
+        ctx.beginPath();
+        ctx.moveTo(Math.cos(rayAngle) * startDist, Math.sin(rayAngle) * startDist);
+        ctx.lineTo(Math.cos(rayAngle + 0.22) * endDist, Math.sin(rayAngle + 0.22) * endDist);
+        ctx.stroke();
+      }
+      ctx.restore();
+
+      // 2. Gravitational lensing outer warp halo
+      const lensGrad = ctx.createRadialGradient(0, 0, r * 0.9, 0, 0, r * 3.6);
+      lensGrad.addColorStop(0, 'rgba(251, 146, 60, 0.9)');
+      lensGrad.addColorStop(0.3, 'rgba(234, 88, 12, 0.7)');
+      lensGrad.addColorStop(0.6, 'rgba(168, 85, 247, 0.45)');
+      lensGrad.addColorStop(0.85, 'rgba(56, 189, 248, 0.3)');
       lensGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
       ctx.fillStyle = lensGrad;
       ctx.beginPath();
-      ctx.arc(0, 0, r * 3.2, 0, Math.PI * 2);
+      ctx.arc(0, 0, r * 3.6, 0, Math.PI * 2);
       ctx.fill();
 
-      // Glowing swirling accretion disk
+      // 3. Glowing swirling relativistic accretion disk (high contrast against wormhole & dark space)
       ctx.save();
-      ctx.rotate(gameTime * 3.5);
-      ctx.strokeStyle = '#f97316';
-      ctx.lineWidth = 9;
-      ctx.shadowColor = '#ea580c';
-      ctx.shadowBlur = 20;
+      ctx.rotate(gameTime * 4.2);
+
+      // Outer Azure Doppler-shifted ring
+      ctx.strokeStyle = '#38bdf8';
+      ctx.lineWidth = 6;
+      ctx.shadowColor = '#0284c7';
+      ctx.shadowBlur = 24;
       ctx.beginPath();
-      ctx.arc(0, 0, r * 1.55, 0, Math.PI * 2);
+      ctx.arc(0, 0, r * 2.1, 0, Math.PI * 2);
       ctx.stroke();
 
-      ctx.strokeStyle = '#38bdf8';
-      ctx.lineWidth = 4;
+      // Blazing superheated thermonuclear plasma ring
+      ctx.strokeStyle = '#f97316';
+      ctx.lineWidth = 14;
+      ctx.shadowColor = '#ea580c';
+      ctx.shadowBlur = 32;
       ctx.beginPath();
-      ctx.arc(0, 0, r * 1.85, 0, Math.PI * 2);
+      ctx.arc(0, 0, r * 1.6, 0, Math.PI * 2);
       ctx.stroke();
+
+      // Inner golden accretion ring
+      ctx.strokeStyle = '#fde047';
+      ctx.lineWidth = 5;
+      ctx.shadowColor = '#ca8a04';
+      ctx.shadowBlur = 20;
+      ctx.beginPath();
+      ctx.arc(0, 0, r * 1.3, 0, Math.PI * 2);
+      ctx.stroke();
+
+      // 4 Logarithmic Plasma Spirals plunging into singularity
+      ctx.lineWidth = 4;
+      for (let arm = 0; arm < 4; arm++) {
+        const baseA = (arm * Math.PI) / 2;
+        ctx.strokeStyle = arm % 2 === 0 ? '#ffedd5' : '#f97316';
+        ctx.beginPath();
+        for (let st = 0; st <= 20; st++) {
+          const tNorm = st / 20;
+          const spiralR = r * 1.1 + tNorm * (r * 1.0);
+          const spiralA = baseA + tNorm * 1.6;
+          const sx = Math.cos(spiralA) * spiralR;
+          const sy = Math.sin(spiralA) * spiralR;
+          if (st === 0) ctx.moveTo(sx, sy);
+          else ctx.lineTo(sx, sy);
+        }
+        ctx.stroke();
+      }
       ctx.shadowBlur = 0;
       ctx.restore();
 
-      // Orbiting absorbed debris caught in the gravitational vortex
+      // 4. Orbiting absorbed debris caught in the gravitational vortex
       bh.absorbedDebris.forEach(deb => {
         const dx = Math.cos(deb.angle) * deb.dist;
         const dy = Math.sin(deb.angle) * deb.dist;
         ctx.fillStyle = deb.color || '#94a3b8';
         ctx.strokeStyle = '#ffffff';
-        ctx.lineWidth = 1.5;
+        ctx.lineWidth = 2;
         ctx.beginPath();
         ctx.arc(dx, dy, deb.radius, 0, Math.PI * 2);
         ctx.fill();
         ctx.stroke();
       });
 
-      // Event Horizon: Absolute Pure Void Blackness
+      // 5. Event Horizon: Absolute Pure Void Singularity
       ctx.fillStyle = '#000000';
       ctx.beginPath();
       ctx.arc(0, 0, r, 0, Math.PI * 2);
       ctx.fill();
 
-      // Relativistic photon sphere ring
+      // Double Einstein photon ring (Radiant Pure White & Gold)
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 3.5;
+      ctx.shadowColor = '#ffffff';
+      ctx.shadowBlur = 18;
+      ctx.beginPath();
+      ctx.arc(0, 0, r + 1.5, 0, Math.PI * 2);
+      ctx.stroke();
+
       ctx.strokeStyle = '#fed7aa';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(0, 0, r + 5, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+
+      // 6. Floating Danger Warning Sign Badge
+      ctx.save();
+      const tagY = -r * 2.3 - 22;
+      const tagW = 280;
+      const tagH = 32;
+      ctx.fillStyle = 'rgba(15, 7, 26, 0.92)';
+      ctx.strokeStyle = '#f43f5e';
       ctx.lineWidth = 2.5;
       ctx.beginPath();
-      ctx.arc(0, 0, r + 2, 0, Math.PI * 2);
+      ctx.roundRect(-tagW / 2, tagY - tagH / 2, tagW, tagH, 10);
+      ctx.fill();
       ctx.stroke();
+
+      ctx.fillStyle = '#fecdd3';
+      ctx.font = '900 13px Orbitron, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('⚠️ AGUJERO NEGRO CÓSMICO ⚠️', 0, tagY);
+      ctx.restore();
     }
 
     ctx.restore();
@@ -2853,4 +3228,1545 @@ export class GameRenderer {
 
     ctx.restore();
   }
+
+  // --- MALEVOLENT SHRINE (TEMPLO DEL MAL / FUKUMA MIZUSHI) RENDERING ---
+  private drawMalevolentShrine(shrine: SantiscatBoss['shrine'], gameTime: number) {
+    const ctx = this.ctx;
+    ctx.save();
+
+    // 1. Fullscreen blood-red atmospheric domain overlay
+    // Covers the entire map with crimson darkness
+    ctx.fillStyle = `rgba(185, 28, 28, ${0.45 * shrine.redIntensity})`;
+    ctx.fillRect(-1000, -1000, 5200, 4400);
+
+    // Vignette blood pulse
+    const pulse = 0.12 + Math.sin(gameTime * 6) * 0.05;
+    ctx.fillStyle = `rgba(127, 29, 29, ${pulse * shrine.redIntensity})`;
+    ctx.fillRect(-1000, -1000, 5200, 4400);
+
+    // 2. Malevolent Shrine Image / Structure manifestation
+    ctx.save();
+    ctx.translate(shrine.shrineX, shrine.shrineY);
+
+    // Demonic red backlight glow
+    const glowGrad = ctx.createRadialGradient(0, 0, 40, 0, 0, 260);
+    glowGrad.addColorStop(0, 'rgba(239, 68, 68, 0.8)');
+    glowGrad.addColorStop(0.5, 'rgba(185, 28, 28, 0.45)');
+    glowGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    ctx.fillStyle = glowGrad;
+    ctx.beginPath();
+    ctx.arc(0, -20, 260, 0, Math.PI * 2);
+    ctx.fill();
+
+    const shrineW = 380;
+    const shrineH = 260;
+    if (this.shrineImg && this.shrineImg.complete && this.shrineImg.naturalWidth > 0) {
+      // Draw actual Malevolent Shrine reference image provided by user
+      ctx.shadowColor = '#dc2626';
+      ctx.shadowBlur = 35;
+      ctx.drawImage(this.shrineImg, -shrineW / 2, -shrineH / 2 - 40, shrineW, shrineH);
+      ctx.shadowBlur = 0;
+    } else {
+      // Procedural fallback: Demonic Torii Pagoda & skulls
+      ctx.fillStyle = '#1c1917';
+      ctx.strokeStyle = '#dc2626';
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      // Curved pagoda roof horns
+      ctx.moveTo(-160, -80);
+      ctx.quadraticCurveTo(0, -120, 160, -80);
+      ctx.lineTo(130, -50);
+      ctx.lineTo(-130, -50);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+
+      // Pillars
+      ctx.fillRect(-110, -50, 30, 140);
+      ctx.fillRect(80, -50, 30, 140);
+      ctx.strokeRect(-110, -50, 30, 140);
+      ctx.strokeRect(80, -50, 30, 140);
+    }
+
+    // Kanji banner over shrine
+    ctx.font = '900 24px "Noto Sans JP", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#ffffff';
+    ctx.shadowColor = '#ff003b';
+    ctx.shadowBlur = 18;
+    ctx.fillText('伏魔御廚子 · 領域展開', 0, -shrineH / 2 - 55);
+    ctx.shadowBlur = 0;
+
+    ctx.restore();
+
+    // 3. Thousands of razor-sharp cleave cuts sweeping the map
+    shrine.cuts.forEach(c => {
+      ctx.strokeStyle = `rgba(255, 255, 255, ${c.alpha})`;
+      ctx.lineWidth = 3.5;
+      ctx.shadowColor = '#ef4444';
+      ctx.shadowBlur = 12;
+      ctx.beginPath();
+      ctx.moveTo(c.x1, c.y1);
+      ctx.lineTo(c.x2, c.y2);
+      ctx.stroke();
+
+      ctx.strokeStyle = `rgba(220, 38, 38, ${c.alpha * 0.9})`;
+      ctx.lineWidth = 6.5;
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+    });
+
+    ctx.restore();
+  }
+
+  // --- JUJUTSU SUMMONS RENDERING ---
+  private drawJujutsuSummons(summons: SantiscatBoss['jujutsuSummons'], gameTime: number, purpleFusionProg: number = 0.5) {
+    const ctx = this.ctx;
+
+    summons.forEach(sm => {
+      if (!sm.active) return;
+      ctx.save();
+      ctx.translate(sm.x, sm.y);
+
+      const bob = Math.sin(gameTime * 3.5 + (sm.id === 'sukunacat' ? 0 : Math.PI)) * 6;
+
+      // 1. Cursed Energy Aura
+      const auraColor = sm.id === 'sukunacat' ? 'rgba(220, 38, 38, 0.45)' : 'rgba(56, 189, 248, 0.45)';
+      const auraGrad = ctx.createRadialGradient(0, bob, sm.width * 0.2, 0, bob, sm.width * 0.85);
+      auraGrad.addColorStop(0, auraColor);
+      auraGrad.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = auraGrad;
+      ctx.beginPath();
+      ctx.arc(0, bob, sm.width * 0.85, 0, Math.PI * 2);
+      ctx.fill();
+
+      // 2. Sprite drawing (with facing flip)
+      ctx.save();
+      ctx.translate(0, bob);
+      ctx.scale(sm.facing, 1);
+
+      const img = sm.id === 'sukunacat' ? this.sukunacatImg : this.gojocatImg;
+      const w = sm.width;
+      const h = sm.height;
+
+      if (img && img.complete && img.naturalWidth > 0) {
+        ctx.shadowColor = sm.id === 'sukunacat' ? '#dc2626' : '#38bdf8';
+        ctx.shadowBlur = 16;
+        ctx.drawImage(img, -w / 2, -h / 2, w, h);
+        ctx.shadowBlur = 0;
+      } else {
+        // Procedural fallback
+        ctx.fillStyle = sm.id === 'sukunacat' ? '#fca5a5' : '#ffffff';
+        ctx.strokeStyle = '#000000';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(0, 0, 34, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+
+        // Ears
+        ctx.beginPath();
+        ctx.moveTo(-24, -26);
+        ctx.lineTo(-38, -50);
+        ctx.lineTo(-8, -34);
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.moveTo(24, -26);
+        ctx.lineTo(38, -50);
+        ctx.lineTo(8, -34);
+        ctx.fill();
+        ctx.stroke();
+
+        if (sm.id === 'sukunacat') {
+          // Sukuna tattoos & four eyes
+          ctx.fillStyle = '#000000';
+          ctx.fillRect(-12, -18, 24, 4);
+          ctx.fillRect(-6, -26, 12, 4);
+
+          // 4 red eyes
+          ctx.fillStyle = '#dc2626';
+          ctx.beginPath();
+          ctx.arc(-14, -8, 3, 0, Math.PI * 2);
+          ctx.arc(14, -8, 3, 0, Math.PI * 2);
+          ctx.arc(-14, -1, 2.5, 0, Math.PI * 2);
+          ctx.arc(14, -1, 2.5, 0, Math.PI * 2);
+          ctx.fill();
+        } else {
+          // Gojo blindfold
+          ctx.fillStyle = '#171717';
+          ctx.fillRect(-26, -14, 52, 12);
+          // Glowing six eyes edge
+          ctx.fillStyle = '#38bdf8';
+          ctx.shadowColor = '#0284c7';
+          ctx.shadowBlur = 8;
+          ctx.fillRect(-12, -4, 24, 2);
+          ctx.shadowBlur = 0;
+        }
+      }
+
+      ctx.restore(); // restore flip
+
+      // 3. Floating paws
+      const pawBob = Math.cos(gameTime * 4) * 4;
+      ctx.fillStyle = sm.id === 'sukunacat' ? '#fee2e2' : '#f0f9ff';
+      ctx.strokeStyle = '#000000';
+      ctx.lineWidth = 2.5;
+
+      ctx.beginPath();
+      ctx.arc(-32, bob + 18 + pawBob, 10, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.arc(32, bob + 18 - pawBob, 10, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+
+      // Gojo Purple Charging Orbs (Red in left, Blue in right)
+      if (sm.id === 'gojocat' && sm.state === 'purple_charge') {
+        const prog = purpleFusionProg;
+
+        // Converging distance: from 45 down to 0
+        const orbOffset = 45 * (1.0 - prog);
+
+        // Blue orb
+        ctx.fillStyle = '#0284c7';
+        ctx.shadowColor = '#38bdf8';
+        ctx.shadowBlur = 18;
+        ctx.beginPath();
+        ctx.arc(-orbOffset, bob + 16, 16, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Red orb
+        ctx.fillStyle = '#dc2626';
+        ctx.shadowColor = '#f43f5e';
+        ctx.beginPath();
+        ctx.arc(orbOffset, bob + 16, 16, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.shadowBlur = 0;
+
+        // Electric lightning sparks between orbs
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(-orbOffset, bob + 16);
+        ctx.lineTo(0, bob + 16 + (Math.random() - 0.5) * 12);
+        ctx.lineTo(orbOffset, bob + 16);
+        ctx.stroke();
+      }
+
+      // 4. Overhead HP Bar
+      const hpPercent = Math.max(0, sm.hp / sm.maxHp);
+      const barW = 76;
+      const barH = 7;
+      const barY = -sm.height / 2 - 20;
+
+      ctx.fillStyle = '#171717';
+      ctx.strokeStyle = '#3f3f46';
+      ctx.lineWidth = 1.5;
+      ctx.fillRect(-barW / 2, barY, barW, barH);
+      ctx.strokeRect(-barW / 2, barY, barW, barH);
+
+      ctx.fillStyle = sm.id === 'sukunacat' ? '#dc2626' : '#0ea5e9';
+      ctx.fillRect(-barW / 2, barY, barW * hpPercent, barH);
+
+      // Name label
+      ctx.font = 'bold 11px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#ffffff';
+      ctx.shadowColor = '#000000';
+      ctx.shadowBlur = 4;
+      ctx.fillText(sm.id === 'sukunacat' ? 'SUKUNACAT' : 'GOJOCAT', 0, barY - 4);
+      ctx.shadowBlur = 0;
+
+      // 5. Chant Speech Bubble if active
+      if (sm.chantText) {
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+        ctx.strokeStyle = '#dc2626';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.roundRect(-100, barY - 32, 200, 22, 6);
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.font = 'bold 11px monospace';
+        ctx.fillStyle = '#fecaca';
+        ctx.fillText(sm.chantText, 0, barY - 17);
+      }
+
+      ctx.restore();
+    });
+
+    // Render independent Sukunacat Cleave / Dismantle slashes
+    summons.forEach(sm => {
+      if (sm.active && sm.slashes && sm.slashes.length > 0) {
+        this.drawSukunacatSlashes(sm.slashes, gameTime);
+      }
+    });
+  }
+
+  private drawSukunacatSlashes(slashes: RealitySlash[], gameTime: number) {
+    const ctx = this.ctx;
+    ctx.save();
+
+    slashes.forEach(s => {
+      if (s.phase === 'telegraph') {
+        // Menacing red laser warning line with rapid pulse
+        const pulse = Math.floor(gameTime * 28) % 2 === 0 ? 0.95 : 0.4;
+        ctx.strokeStyle = `rgba(220, 38, 38, ${pulse})`;
+        ctx.lineWidth = 3;
+        ctx.setLineDash([10, 6]);
+        ctx.beginPath();
+        ctx.moveTo(s.x1, s.y1);
+        ctx.lineTo(s.x2, s.y2);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      } else if (s.phase === 'slash') {
+        // Brutal Sukuna Cleave: Pure white inner core with crimson cursed aura & black spark
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = s.width * 1.15;
+        ctx.shadowColor = '#dc2626';
+        ctx.shadowBlur = 24;
+        ctx.beginPath();
+        ctx.moveTo(s.x1, s.y1);
+        ctx.lineTo(s.x2, s.y2);
+        ctx.stroke();
+
+        ctx.strokeStyle = '#991b1b';
+        ctx.lineWidth = s.width * 0.7;
+        ctx.stroke();
+        ctx.shadowBlur = 0;
+
+        // Cursed black spark accents
+        ctx.strokeStyle = '#000000';
+        ctx.lineWidth = 3;
+        const midX = (s.x1 + s.x2) / 2;
+        const midY = (s.y1 + s.y2) / 2;
+        ctx.beginPath();
+        ctx.moveTo(midX - 15, midY - 15);
+        ctx.lineTo(midX, midY + 12);
+        ctx.lineTo(midX + 18, midY - 8);
+        ctx.stroke();
+      } else {
+        // Residual fading blood scar
+        ctx.strokeStyle = 'rgba(185, 28, 28, 0.45)';
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.moveTo(s.x1, s.y1);
+        ctx.lineTo(s.x2, s.y2);
+        ctx.stroke();
+      }
+    });
+
+    ctx.restore();
+  }
+
+  // --- GOJO TECHNIQUES RENDERING: BLUE, RED & PURPLE ---
+  private drawGojoTechniques(gt: SantiscatBoss['gojoTechniques'], gameTime: number) {
+    const ctx = this.ctx;
+
+    // 1. Azul (Lapse: Blue / Rotación del Ritual)
+    if (gt.blue.active) {
+      const b = gt.blue;
+      ctx.save();
+      ctx.translate(b.x, b.y);
+
+      // Gravitational suction vortex field
+      const fieldGrad = ctx.createRadialGradient(0, 0, b.radius * 0.4, 0, 0, b.suctionRadius);
+      fieldGrad.addColorStop(0, 'rgba(14, 165, 233, 0.5)');
+      fieldGrad.addColorStop(0.5, 'rgba(2, 132, 199, 0.2)');
+      fieldGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+      ctx.fillStyle = fieldGrad;
+      ctx.beginPath();
+      ctx.arc(0, 0, b.suctionRadius, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Outer perimeter boundary ring (shows player where suction ends)
+      ctx.strokeStyle = 'rgba(56, 189, 248, 0.45)';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([8, 8]);
+      ctx.beginPath();
+      ctx.arc(0, 0, b.suctionRadius, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      // Swirling suction spiral arms
+      ctx.save();
+      ctx.rotate(-gameTime * 6);
+      ctx.strokeStyle = 'rgba(56, 189, 248, 0.7)';
+      ctx.lineWidth = 3.5;
+      for (let i = 0; i < 4; i++) {
+        const a = (i * Math.PI) / 2;
+        ctx.beginPath();
+        ctx.arc(0, 0, b.radius * 1.8, a, a + 1.2);
+        ctx.stroke();
+      }
+      ctx.restore();
+
+      // Intense brilliant electric cyan core
+      ctx.fillStyle = '#38bdf8';
+      ctx.shadowColor = '#0284c7';
+      ctx.shadowBlur = 28;
+      ctx.beginPath();
+      ctx.arc(0, 0, b.radius, 0, Math.PI * 2);
+      ctx.fill();
+
+      // White incandescent center
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(0, 0, b.radius * 0.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+
+      // Orbiting suction debris
+      b.absorbedDebris.forEach(deb => {
+        ctx.save();
+        ctx.translate(deb.x - b.x, deb.y - b.y);
+        ctx.rotate(deb.angle);
+        ctx.fillStyle = deb.color;
+        ctx.fillRect(-deb.radius / 2, -deb.radius / 2, deb.radius, deb.radius);
+        ctx.restore();
+      });
+
+      ctx.restore();
+    }
+
+    // 2. Rojo (Reversal: Red / Reversión del Ritual)
+    if (gt.red.active) {
+      const r = gt.red;
+      ctx.save();
+      ctx.translate(r.x, r.y);
+
+      // Repulsion shockwave wave
+      ctx.strokeStyle = `rgba(239, 68, 68, ${Math.max(0, 1.0 - r.radius / r.maxRadius)})`;
+      ctx.lineWidth = 8;
+      ctx.shadowColor = '#dc2626';
+      ctx.shadowBlur = 24;
+      ctx.beginPath();
+      ctx.arc(0, 0, r.radius, 0, Math.PI * 2);
+      ctx.stroke();
+
+      // Second outer ring
+      ctx.strokeStyle = `rgba(254, 205, 211, ${Math.max(0, 0.8 - r.radius / r.maxRadius)})`;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(0, 0, r.radius * 1.15, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+
+      // Flying blasted debris
+      r.repelledDebris.forEach(deb => {
+        ctx.save();
+        ctx.translate(deb.x - r.x, deb.y - r.y);
+        ctx.rotate(deb.angle);
+        ctx.fillStyle = deb.color;
+        ctx.fillRect(-deb.radius / 2, -deb.radius / 2, deb.radius, deb.radius);
+        ctx.restore();
+      });
+
+      ctx.restore();
+    }
+
+    // 3. Vacío Púrpura (Kyoshiki Murasaki / Hollow Purple)
+    if (gt.purple.active && gt.purple.phase === 'fired') {
+      const pur = gt.purple;
+      ctx.save();
+      ctx.translate(pur.x, pur.y);
+
+      // Distorted plasma aura
+      const pr = pur.radius;
+      const purpleGrad = ctx.createRadialGradient(0, 0, pr * 0.4, 0, 0, pr * 2.5);
+      purpleGrad.addColorStop(0, 'rgba(168, 85, 247, 0.9)');
+      purpleGrad.addColorStop(0.35, 'rgba(217, 70, 239, 0.6)');
+      purpleGrad.addColorStop(0.7, 'rgba(56, 189, 248, 0.25)');
+      purpleGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+      ctx.fillStyle = purpleGrad;
+      ctx.beginPath();
+      ctx.arc(0, 0, pr * 2.5, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Swirling electric rings around Hollow Purple
+      ctx.save();
+      ctx.rotate(gameTime * 8);
+      ctx.strokeStyle = '#e879f9';
+      ctx.lineWidth = 6;
+      ctx.shadowColor = '#c084fc';
+      ctx.shadowBlur = 30;
+      ctx.beginPath();
+      ctx.arc(0, 0, pr * 1.25, 0, Math.PI * 2);
+      ctx.stroke();
+
+      // Inner cyan quantum halo
+      ctx.strokeStyle = '#38bdf8';
+      ctx.lineWidth = 3.5;
+      ctx.beginPath();
+      ctx.arc(0, 0, pr * 1.45, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+      ctx.restore();
+
+      // Pure Void Singularity Core: Erasure of Spacetime
+      ctx.fillStyle = '#0f051d';
+      ctx.beginPath();
+      ctx.arc(0, 0, pr * 0.8, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Incandescent Violet Energy Edge
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.arc(0, 0, pr * 0.82, 0, Math.PI * 2);
+      ctx.stroke();
+
+      ctx.restore();
+    }
+  }
+
+  // =========================================================================
+  // SANTISCAT PHASE 2 & 2.5 RENDERING (PORTAL, 12 SOULS, WORMHOLE, OMEGA SAVE)
+  // =========================================================================
+
+  public drawDarkShadowPortal(boss: SantiscatBoss, catY: number, gameTime: number) {
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.translate(boss.x, catY);
+    ctx.scale(boss.portalScale, boss.portalScale);
+    ctx.rotate(boss.portalAngle);
+
+    // Dark swirling vortex disk
+    for (let r = 180; r >= 20; r -= 25) {
+      const grad = ctx.createRadialGradient(0, 0, r * 0.3, 0, 0, r);
+      grad.addColorStop(0, '#000000');
+      grad.addColorStop(0.5, 'rgba(88, 28, 135, 0.55)');
+      grad.addColorStop(0.85, 'rgba(15, 23, 42, 0.7)');
+      grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(0, 0, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Shadow tendrils spiraling from portal
+    ctx.strokeStyle = 'rgba(168, 85, 247, 0.4)';
+    ctx.lineWidth = 3;
+    for (let i = 0; i < 8; i++) {
+      const a = (i * Math.PI * 2) / 8;
+      ctx.beginPath();
+      ctx.arc(0, 0, 140, a, a + 0.9);
+      ctx.stroke();
+    }
+
+    ctx.restore();
+  }
+
+  public drawHumanSouls(boss: SantiscatBoss, catY: number, gameTime: number) {
+    const ctx = this.ctx;
+
+    boss.souls.forEach((soul, i) => {
+      if (soul.absorbed || soul.alpha <= 0.01) return;
+
+      const sx = boss.x + Math.cos(soul.angle) * soul.distance;
+      const sy = catY + Math.sin(soul.angle) * soul.distance;
+
+      ctx.save();
+      ctx.globalAlpha = soul.alpha;
+      ctx.translate(sx, sy);
+
+      // Glowing aura
+      const auraR = 32 * soul.scale;
+      const soulGrad = ctx.createRadialGradient(0, 0, 4, 0, 0, auraR);
+      soulGrad.addColorStop(0, soul.color);
+      soulGrad.addColorStop(0.5, soul.glowColor);
+      soulGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+      ctx.fillStyle = soulGrad;
+      ctx.beginPath();
+      ctx.arc(0, 0, auraR, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Draw Soul Heart Sprite (User's provided PNGs)
+      const img = this.soulImages[soul.id];
+      const soulSize = 38 * soul.scale;
+      if (img && img.complete && img.naturalWidth > 0) {
+        ctx.drawImage(img, -soulSize / 2, -soulSize / 2, soulSize, soulSize);
+      } else {
+        // Fallback Undertale style heart
+        ctx.fillStyle = soul.color;
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        const topCurveHeight = soulSize * 0.3;
+        ctx.moveTo(0, topCurveHeight);
+        ctx.bezierCurveTo(0, 0, -soulSize / 2, 0, -soulSize / 2, topCurveHeight);
+        ctx.bezierCurveTo(-soulSize / 2, (soulSize + topCurveHeight) / 2, 0, (soulSize + topCurveHeight) / 2, 0, soulSize);
+        ctx.bezierCurveTo(0, (soulSize + topCurveHeight) / 2, soulSize / 2, (soulSize + topCurveHeight) / 2, soulSize / 2, topCurveHeight);
+        ctx.bezierCurveTo(soulSize / 2, 0, 0, 0, 0, topCurveHeight);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+      }
+
+      // Soul Trait Label
+      ctx.fillStyle = soul.color;
+      ctx.font = 'bold 11px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.shadowColor = '#000000';
+      ctx.shadowBlur = 4;
+      ctx.fillText(soul.trait.toUpperCase(), 0, soulSize * 0.65 + 8);
+      ctx.shadowBlur = 0;
+
+      ctx.restore();
+    });
+  }
+
+  public drawRainbowBlast(boss: SantiscatBoss, gameTime: number) {
+    const rb = boss.rainbowBlast;
+    if (!rb || !rb.active) return;
+    const ctx = this.ctx;
+
+    const beamY = boss.y;
+    const beamH = rb.beamWidth;
+    const topY = beamY - beamH / 2;
+
+    ctx.save();
+
+    // 1. Telegraph warning phase (showing safe corridor)
+    if (rb.timer < rb.chargeDuration) {
+      const progress = rb.timer / rb.chargeDuration;
+      ctx.globalAlpha = 0.25 + 0.3 * Math.sin(gameTime * 20);
+
+      // Warning lane over entire arena width
+      const warnGrad = ctx.createLinearGradient(0, topY, 0, topY + beamH);
+      warnGrad.addColorStop(0, 'rgba(239, 68, 68, 0.15)');
+      warnGrad.addColorStop(0.5, 'rgba(234, 179, 8, 0.35)');
+      warnGrad.addColorStop(1, 'rgba(239, 68, 68, 0.15)');
+      ctx.fillStyle = warnGrad;
+      ctx.fillRect(0, topY, 3200, beamH);
+
+      // Animated diagonal hazard stripes
+      ctx.strokeStyle = 'rgba(239, 68, 68, 0.6)';
+      ctx.lineWidth = 4;
+      const stripeSpacing = 60;
+      const offset = (gameTime * 120) % stripeSpacing;
+      for (let x = -beamH; x < 3200 + beamH; x += stripeSpacing) {
+        ctx.beginPath();
+        ctx.moveTo(x + offset, topY);
+        ctx.lineTo(x + offset - beamH, topY + beamH);
+        ctx.stroke();
+      }
+
+      // Safe Corridor Indicator Banner
+      ctx.globalAlpha = 1.0;
+      ctx.fillStyle = '#22c55e';
+      ctx.font = '900 18px Orbitron, sans-serif';
+      ctx.textAlign = 'center';
+      const safeText = rb.safeSide === 'top' ? '⬇️ ¡ZONA SEGURA ARRIBA! ⬇️' : '⬆️ ¡ZONA SEGURA ABAJO! ⬆️';
+      ctx.fillText(safeText, boss.x, rb.safeSide === 'top' ? topY - 30 : topY + beamH + 45);
+
+    } else {
+      // 2. GIANT RAINBOW BEAM FIRING!
+      const fireTime = rb.timer - rb.chargeDuration;
+      const fade = Math.min(1, Math.sin((fireTime / rb.fireDuration) * Math.PI));
+      ctx.globalAlpha = fade;
+
+      // Colossal Multi-Color Prismatic Laser Beam across whole arena
+      const rainbowGrad = ctx.createLinearGradient(0, topY, 0, topY + beamH);
+      rainbowGrad.addColorStop(0, '#ef4444');
+      rainbowGrad.addColorStop(0.16, '#f97316');
+      rainbowGrad.addColorStop(0.33, '#eab308');
+      rainbowGrad.addColorStop(0.5, '#22c55e');
+      rainbowGrad.addColorStop(0.66, '#06b6d4');
+      rainbowGrad.addColorStop(0.83, '#3b82f6');
+      rainbowGrad.addColorStop(1, '#a855f7');
+
+      ctx.fillStyle = rainbowGrad;
+      ctx.shadowColor = '#ffffff';
+      ctx.shadowBlur = 40;
+      ctx.fillRect(0, topY, 3200, beamH);
+
+      // White Hot Laser Core
+      const coreH = beamH * 0.45;
+      const coreGrad = ctx.createLinearGradient(0, beamY - coreH / 2, 0, beamY + coreH / 2);
+      coreGrad.addColorStop(0, 'rgba(255, 255, 255, 0.4)');
+      coreGrad.addColorStop(0.5, 'rgba(255, 255, 255, 0.95)');
+      coreGrad.addColorStop(1, 'rgba(255, 255, 255, 0.4)');
+      ctx.fillStyle = coreGrad;
+      ctx.fillRect(0, beamY - coreH / 2, 3200, coreH);
+      ctx.shadowBlur = 0;
+
+      // High-energy lightning arcs running through rainbow beam
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 3;
+      for (let j = 0; j < 3; j++) {
+        ctx.beginPath();
+        let lx = 0;
+        let ly = beamY + (Math.sin(j + gameTime * 12) * beamH * 0.3);
+        ctx.moveTo(lx, ly);
+        while (lx < 3200) {
+          lx += 80 + Math.random() * 60;
+          ly = beamY + (Math.sin(lx * 0.01 + gameTime * 15 + j) * beamH * 0.35);
+          ctx.lineTo(lx, ly);
+        }
+        ctx.stroke();
+      }
+    }
+
+    ctx.restore();
+  }
+
+  public drawGalaxies(boss: SantiscatBoss, gameTime: number) {
+    const ctx = this.ctx;
+
+    boss.galaxies.forEach(g => {
+      ctx.save();
+      ctx.translate(g.x, g.y);
+      ctx.rotate(g.rotation);
+
+      // Galactic core
+      const coreGrad = ctx.createRadialGradient(0, 0, 4, 0, 0, g.radius * 0.4);
+      coreGrad.addColorStop(0, '#ffffff');
+      coreGrad.addColorStop(0.5, g.color);
+      coreGrad.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = coreGrad;
+      ctx.beginPath();
+      ctx.arc(0, 0, g.radius * 0.4, 0, Math.PI * 2);
+      ctx.fill();
+
+      // 4 Spiral Arms
+      ctx.lineWidth = 3.5;
+      ctx.strokeStyle = g.color;
+      ctx.shadowColor = g.color;
+      ctx.shadowBlur = 15;
+
+      for (let arm = 0; arm < 4; arm++) {
+        const armAngle = (arm * Math.PI) / 2;
+        ctx.beginPath();
+        for (let t = 0; t <= Math.PI * 1.5; t += 0.15) {
+          const r = (g.radius * t) / (Math.PI * 1.5);
+          const px = Math.cos(t + armAngle) * r;
+          const py = Math.sin(t + armAngle) * r * 0.65;
+          if (t === 0) ctx.moveTo(px, py);
+          else ctx.lineTo(px, py);
+        }
+        ctx.stroke();
+      }
+
+      ctx.restore();
+    });
+  }
+
+  public drawGiantStarsAndSupernovas(boss: SantiscatBoss, gameTime: number) {
+    const ctx = this.ctx;
+
+    // 1. Giant Burning Stars with Solar Prominences & Implosion
+    boss.giantStars.forEach(st => {
+      if (st.exploded) return;
+      ctx.save();
+      ctx.translate(st.x, st.y);
+
+      // Implosion phase right before supernova detonation
+      const isImploding = st.explosionTimer < 0.6;
+      const collapseScale = isImploding ? Math.max(0.35, st.explosionTimer / 0.6) : 1.0;
+      const pulse = 1.0 + 0.12 * Math.sin(gameTime * 12);
+      const curRadius = st.radius * collapseScale * pulse;
+
+      // Gravitational lensing rings if imploding
+      if (isImploding) {
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.85)';
+        ctx.lineWidth = 2.5;
+        for (let r = 1; r <= 3; r++) {
+          const lRadius = curRadius * (1.2 + r * 0.5) * (st.explosionTimer / 0.6);
+          ctx.beginPath();
+          ctx.arc(0, 0, lRadius, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+      }
+
+      // Outer boiling chromosphere & coronal glow
+      const corona = ctx.createRadialGradient(0, 0, curRadius * 0.25, 0, 0, curRadius * 2.2);
+      corona.addColorStop(0, '#ffffff');
+      corona.addColorStop(0.25, '#fef08a');
+      corona.addColorStop(0.55, st.color);
+      corona.addColorStop(0.85, '#991b1b');
+      corona.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = corona;
+      ctx.beginPath();
+      ctx.arc(0, 0, curRadius * 2.2, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Coronal flares (12 radial flares rotating)
+      ctx.save();
+      ctx.rotate(gameTime * 1.5);
+      for (let i = 0; i < 12; i++) {
+        const ang = (i * Math.PI * 2) / 12;
+        const flareLen = curRadius * (1.4 + 0.4 * Math.sin(gameTime * 15 + i * 2));
+        ctx.strokeStyle = st.color;
+        ctx.lineWidth = 3;
+        ctx.shadowColor = '#facc15';
+        ctx.shadowBlur = 15;
+        ctx.beginPath();
+        ctx.moveTo(Math.cos(ang) * curRadius * 0.8, Math.sin(ang) * curRadius * 0.8);
+        ctx.lineTo(Math.cos(ang) * flareLen, Math.sin(ang) * flareLen);
+        ctx.stroke();
+      }
+      ctx.restore();
+
+      // Solar magnetic loops / prominences arcing off surface
+      for (let p = 0; p < 4; p++) {
+        const baseAng = (p * Math.PI) / 2 + gameTime * 0.8;
+        const p1x = Math.cos(baseAng - 0.25) * curRadius;
+        const p1y = Math.sin(baseAng - 0.25) * curRadius;
+        const p2x = Math.cos(baseAng + 0.25) * curRadius;
+        const p2y = Math.sin(baseAng + 0.25) * curRadius;
+        const peakX = Math.cos(baseAng) * (curRadius * 1.6);
+        const peakY = Math.sin(baseAng) * (curRadius * 1.6);
+
+        ctx.strokeStyle = '#fef08a';
+        ctx.lineWidth = 2.5;
+        ctx.shadowColor = st.color;
+        ctx.shadowBlur = 12;
+        ctx.beginPath();
+        ctx.moveTo(p1x, p1y);
+        ctx.quadraticCurveTo(peakX, peakY, p2x, p2y);
+        ctx.stroke();
+      }
+
+      // Blazing dense white-hot core
+      const coreGrad = ctx.createRadialGradient(0, 0, 2, 0, 0, curRadius * 0.7);
+      coreGrad.addColorStop(0, '#ffffff');
+      coreGrad.addColorStop(0.5, '#ffffff');
+      coreGrad.addColorStop(0.85, '#fef08a');
+      coreGrad.addColorStop(1, st.color);
+      ctx.fillStyle = coreGrad;
+      ctx.beginPath();
+      ctx.arc(0, 0, curRadius * 0.7, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.restore();
+    });
+
+    // 2. Colossal, Hyper-Explosive Supernovas
+    boss.supernovas.forEach(sn => {
+      ctx.save();
+      ctx.translate(sn.x, sn.y);
+
+      const alpha = Math.max(0, sn.life / sn.maxLife);
+      const progress = 1 - sn.life / sn.maxLife;
+
+      // Layer 1: Blinding Hyper-Core Flash at explosion origin
+      if (progress < 0.45) {
+        const flashAlpha = (1 - progress / 0.45) * 0.95;
+        const flashRadius = Math.min(sn.radius * 0.8, 160);
+        const flashGrad = ctx.createRadialGradient(0, 0, 5, 0, 0, flashRadius);
+        flashGrad.addColorStop(0, `rgba(255, 255, 255, ${flashAlpha})`);
+        flashGrad.addColorStop(0.4, `rgba(254, 240, 138, ${flashAlpha * 0.8})`);
+        flashGrad.addColorStop(0.75, `rgba(249, 115, 22, ${flashAlpha * 0.5})`);
+        flashGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+        ctx.fillStyle = flashGrad;
+        ctx.beginPath();
+        ctx.arc(0, 0, flashRadius, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      // Layer 2: Expanding Interstellar Nebular Clouds (8 swirling lobes)
+      for (let n = 0; n < 8; n++) {
+        const nAng = (n * Math.PI * 2) / 8 + gameTime * 0.4 + n * 0.2;
+        const nDist = sn.radius * 0.65;
+        const nx = Math.cos(nAng) * nDist;
+        const ny = Math.sin(nAng) * nDist;
+        const nSize = sn.radius * 0.42;
+
+        const nebGrad = ctx.createRadialGradient(nx, ny, 4, nx, ny, nSize);
+        const nebColors = ['#a855f7', '#ec4899', '#f59e0b', '#06b6d4'];
+        const col = nebColors[n % nebColors.length];
+        nebGrad.addColorStop(0, `${col}${Math.floor(alpha * 140).toString(16).padStart(2, '0')}`);
+        nebGrad.addColorStop(0.6, `${col}${Math.floor(alpha * 70).toString(16).padStart(2, '0')}`);
+        nebGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+        ctx.fillStyle = nebGrad;
+        ctx.beginPath();
+        ctx.arc(nx, ny, nSize, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      // Layer 3: 20 Cosmic Star Shards / Relativistic Ejecta hurtling radially
+      for (let s = 0; s < 20; s++) {
+        const shardAng = (s * Math.PI * 2) / 20 + (s % 3) * 0.15;
+        const shardDist = sn.radius * (0.85 + 0.15 * Math.sin(s * 7));
+        const sx = Math.cos(shardAng) * shardDist;
+        const sy = Math.sin(shardAng) * shardDist;
+        const tailLen = 32 * alpha;
+
+        // Cometary tail pointing back to epicenter
+        ctx.strokeStyle = `rgba(254, 240, 138, ${alpha * 0.75})`;
+        ctx.lineWidth = 3.5;
+        ctx.shadowColor = '#f59e0b';
+        ctx.shadowBlur = 12;
+        ctx.beginPath();
+        ctx.moveTo(sx, sy);
+        ctx.lineTo(sx - Math.cos(shardAng) * tailLen, sy - Math.sin(shardAng) * tailLen);
+        ctx.stroke();
+
+        // Glowing shard diamond head
+        ctx.fillStyle = '#ffffff';
+        ctx.shadowColor = '#ffffff';
+        ctx.shadowBlur = 16;
+        ctx.beginPath();
+        ctx.arc(sx, sy, 4.5 * alpha, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      // Layer 4: Primary Relativistic Blast Wave (Thick blinding fire ring)
+      ctx.shadowColor = sn.color;
+      ctx.shadowBlur = 35;
+      ctx.strokeStyle = `rgba(255, 255, 255, ${alpha})`;
+      ctx.lineWidth = 8 * alpha;
+      ctx.beginPath();
+      ctx.arc(0, 0, sn.radius, 0, Math.PI * 2);
+      ctx.stroke();
+
+      // Jagged electric plasma discharge along shockwave perimeter
+      ctx.strokeStyle = `rgba(254, 204, 21, ${alpha * 0.9})`;
+      ctx.lineWidth = 3.5;
+      ctx.beginPath();
+      for (let j = 0; j <= 36; j++) {
+        const jAng = (j * Math.PI * 2) / 36;
+        const jRadius = sn.radius + Math.sin(j * 8 + gameTime * 25) * 8;
+        const jx = Math.cos(jAng) * jRadius;
+        const jy = Math.sin(jAng) * jRadius;
+        if (j === 0) ctx.moveTo(jx, jy);
+        else ctx.lineTo(jx, jy);
+      }
+      ctx.closePath();
+      ctx.stroke();
+
+      // Layer 5: Outer Relativistic Gamma-Ray Wavefront
+      ctx.strokeStyle = `rgba(168, 85, 247, ${alpha * 0.75})`;
+      ctx.lineWidth = 4 * alpha;
+      ctx.beginPath();
+      ctx.arc(0, 0, sn.radius * 1.15, 0, Math.PI * 2);
+      ctx.stroke();
+
+      // Shockwave teeth / radial spikes
+      for (let k = 0; k < 16; k++) {
+        const kAng = (k * Math.PI * 2) / 16 + gameTime * 0.5;
+        const r1 = sn.radius * 0.95;
+        const r2 = sn.radius * 1.18;
+        ctx.strokeStyle = `rgba(255, 255, 255, ${alpha * 0.6})`;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(Math.cos(kAng) * r1, Math.sin(kAng) * r1);
+        ctx.lineTo(Math.cos(kAng) * r2, Math.sin(kAng) * r2);
+        ctx.stroke();
+      }
+
+      ctx.restore();
+    });
+  }
+
+  public drawOmegaSaveBox(boss: SantiscatBoss, gameTime: number) {
+    const os = boss.omegaSave;
+    if (!os || !os.active || !os.stateText || os.textTimer <= 0) return;
+
+    const ctx = this.ctx;
+    ctx.save();
+
+    // Undertale File Saved / Loaded Box (screen space / near boss)
+    const boxW = 280;
+    const boxH = 54;
+    const bx = boss.x - boxW / 2;
+    const by = boss.y - 120;
+
+    // Classic Undertale Dialogue Box
+    ctx.fillStyle = '#000000';
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 4;
+    ctx.fillRect(bx, by, boxW, boxH);
+    ctx.strokeRect(bx, by, boxW, boxH);
+
+    // Text: [ FILE 1 SAVED ] / [ FILE 1 LOADED ]
+    const isLoaded = os.stateText.includes('LOADED');
+    ctx.fillStyle = isLoaded ? '#f43f5e' : '#38bdf8';
+    ctx.font = 'bold 20px "Courier New", monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText(os.stateText, bx + boxW / 2, by + 34);
+
+    ctx.restore();
+  }
+
+  public drawRefusedToDieSequence(boss: SantiscatBoss, gameTime: number) {
+    const rd = boss.refusedToDie;
+    if (!rd || !rd.active) return;
+
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.translate(rd.heartX, rd.heartY);
+
+    const heartSize = 52;
+    const t = rd.timer;
+
+    // Stage 1: Shattering crack
+    if (t < 0.45) {
+      // Red Heart with cracking line
+      ctx.fillStyle = '#ef4444';
+      ctx.strokeStyle = '#000000';
+      ctx.lineWidth = 3;
+
+      // Left piece
+      ctx.save();
+      ctx.translate(-t * 24, 0);
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.lineTo(-heartSize / 2, -heartSize / 2);
+      ctx.lineTo(-heartSize / 2, 0);
+      ctx.lineTo(0, heartSize / 2);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      ctx.restore();
+
+      // Right piece
+      ctx.save();
+      ctx.translate(t * 24, 0);
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.lineTo(heartSize / 2, -heartSize / 2);
+      ctx.lineTo(heartSize / 2, 0);
+      ctx.lineTo(0, heartSize / 2);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      ctx.restore();
+
+    } else {
+      // Stage 2: Mending with radiant golden/white flash: "But it refused."
+      const mendPulse = 1.0 + 0.18 * Math.sin(t * 14);
+      ctx.scale(mendPulse, mendPulse);
+
+      // Radiant mending aura
+      const mGrad = ctx.createRadialGradient(0, 0, 5, 0, 0, heartSize * 1.8);
+      mGrad.addColorStop(0, '#ffffff');
+      mGrad.addColorStop(0.4, '#facc15');
+      mGrad.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = mGrad;
+      ctx.beginPath();
+      ctx.arc(0, 0, heartSize * 1.8, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Restored Solid Red Determination Heart
+      ctx.fillStyle = '#ef4444';
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 3.5;
+      ctx.beginPath();
+      ctx.moveTo(0, -heartSize / 4);
+      ctx.bezierCurveTo(0, -heartSize / 2, -heartSize / 2, -heartSize / 2, -heartSize / 2, -heartSize / 4);
+      ctx.bezierCurveTo(-heartSize / 2, 0, 0, heartSize / 4, 0, heartSize / 2);
+      ctx.bezierCurveTo(0, heartSize / 4, heartSize / 2, 0, heartSize / 2, -heartSize / 4);
+      ctx.bezierCurveTo(heartSize / 2, -heartSize / 2, 0, -heartSize / 2, 0, -heartSize / 4);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+
+      // Undertale Dialogue text: "* Pero te rehusaste a morir."
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 18px "Courier New", monospace';
+      ctx.textAlign = 'center';
+      ctx.shadowColor = '#000000';
+      ctx.shadowBlur = 6;
+      ctx.fillText('* Pero te rehusaste a morir.', 0, heartSize + 30);
+      ctx.shadowBlur = 0;
+    }
+
+    ctx.restore();
+  }
+
+  public drawWormholeCanvasBackground(gameTime: number) {
+    const ctx = this.ctx;
+    ctx.save();
+
+    // Psychedelic fractal wormhole tunnel
+    const cx = this.width / 2;
+    const cy = this.height / 2;
+
+    // Dark cosmic base
+    const baseGrad = ctx.createRadialGradient(cx, cy, 30, cx, cy, this.width * 0.75);
+    baseGrad.addColorStop(0, '#000000');
+    baseGrad.addColorStop(0.4, '#1e052d');
+    baseGrad.addColorStop(0.8, '#0b0217');
+    baseGrad.addColorStop(1, '#020005');
+    ctx.fillStyle = baseGrad;
+    ctx.fillRect(0, 0, this.width, this.height);
+
+    // Zooming concentric tunnel rings with shifting rainbow hues
+    const ringCount = 14;
+    for (let i = 0; i < ringCount; i++) {
+      const p = ((i / ringCount) + (gameTime * 0.45)) % 1.0;
+      const r = Math.pow(p, 2.2) * (this.width * 0.85);
+      const hue = (i * 28 + gameTime * 90) % 360;
+
+      ctx.strokeStyle = `hsla(${hue}, 95%, 65%, ${0.25 + 0.6 * p})`;
+      ctx.lineWidth = 3 + p * 6;
+      ctx.beginPath();
+      ctx.ellipse(cx, cy, r, r * 0.65, gameTime * 0.3, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    // Radial warp lines rushing forward
+    ctx.lineWidth = 2;
+    for (let a = 0; a < 24; a++) {
+      const ang = (a * Math.PI * 2) / 24 + Math.sin(gameTime + a) * 0.1;
+      const hue = (a * 15 + gameTime * 60) % 360;
+      ctx.strokeStyle = `hsla(${hue}, 85%, 60%, 0.3)`;
+      ctx.beginPath();
+      ctx.moveTo(cx + Math.cos(ang) * 40, cy + Math.sin(ang) * 40);
+      ctx.lineTo(cx + Math.cos(ang) * (this.width * 0.9), cy + Math.sin(ang) * (this.height * 0.9));
+      ctx.stroke();
+    }
+
+    ctx.restore();
+  }
+
+  public drawAlternateUniverseBackground(gameTime: number) {
+    const ctx = this.ctx;
+    ctx.save();
+
+    // Surreal alternate cosmos: Inverted nebula and violet filaments
+    const univGrad = ctx.createLinearGradient(0, 0, this.width, this.height);
+    univGrad.addColorStop(0, '#030009');
+    univGrad.addColorStop(0.35, '#120224');
+    univGrad.addColorStop(0.7, '#021820');
+    univGrad.addColorStop(1, '#060012');
+    ctx.fillStyle = univGrad;
+    ctx.fillRect(0, 0, this.width, this.height);
+
+    // Shifting cosmic filaments
+    for (let f = 0; f < 5; f++) {
+      ctx.strokeStyle = f % 2 === 0 ? 'rgba(236, 72, 153, 0.15)' : 'rgba(56, 189, 248, 0.15)';
+      ctx.lineWidth = 14;
+      ctx.beginPath();
+      const waveY = this.height * (0.2 + f * 0.16);
+      ctx.moveTo(0, waveY);
+      for (let x = 0; x <= this.width; x += 40) {
+        const y = waveY + Math.sin((x * 0.008) + gameTime * 0.8 + f) * 45;
+        ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+    }
+
+    // Distant surreal crystal stars
+    this.stars.forEach(s => {
+      const flicker = 0.5 + 0.5 * Math.sin(gameTime * 5 + s.x);
+      ctx.fillStyle = s.x % 3 === 0 ? `rgba(244, 114, 182, ${flicker})` : s.x % 3 === 1 ? `rgba(56, 189, 248, ${flicker})` : `rgba(250, 204, 21, ${flicker})`;
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, s.size * 1.3, 0, Math.PI * 2);
+      ctx.fill();
+    });
+
+    ctx.restore();
+  }
+
+  public drawSantiscatDefeatCinematic(
+    cinematic: SantiscatDefeatCinematicState,
+    gameTime: number,
+    player: Player
+  ) {
+    const ctx = this.ctx;
+    const c = cinematic;
+
+    ctx.save();
+
+    // 1. Cinematic letterbox bars
+    const barHeight = 48;
+    ctx.fillStyle = '#000000';
+    ctx.fillRect(0, 0, this.width, barHeight);
+    ctx.fillRect(0, this.height - barHeight, this.width, barHeight);
+
+    // 2. Cosmic Background: alternate universe surreal nebula
+    this.drawAlternateUniverseBackground(gameTime);
+
+    // Screen Center for cinematic focus
+    const cx = this.width / 2;
+    const cy = this.height / 2 - 25;
+
+    // 3. Draw Santiscat immobilized with glowing divine light rays (if not yet completely disintegrated)
+    if (c.phase !== 'giant_explosion' && c.phase !== 'fade_to_victory') {
+      ctx.save();
+      ctx.translate(cx, cy);
+
+      // Shivering convulsions (destabilizing cosmic body)
+      const convulsionStrength = c.phase === 'shield_warning' ? 10 : c.phase === 'shader_implosion' ? 18 : 5;
+      const shiverX = (Math.random() - 0.5) * convulsionStrength;
+      const shiverY = (Math.random() - 0.5) * convulsionStrength;
+      ctx.translate(shiverX, shiverY);
+
+      // Scale down during singularity implosion as matter is compressed
+      if (c.phase === 'shader_implosion') {
+        const implodeScale = Math.max(0.12, 1.0 - c.implosionProgress * 0.88);
+        ctx.scale(implodeScale, implodeScale);
+        ctx.rotate(c.implosionProgress * 12.0);
+      }
+
+      // Blinding Divine God Rays radiating outwards (360 degrees)
+      const rayCount = 20;
+      for (let i = 0; i < rayCount; i++) {
+        const ang = (i * Math.PI * 2) / rayCount + gameTime * 0.9;
+        const rayLen = 500 * (0.4 + c.lightIntensity * 0.6);
+        const rayGrad = ctx.createLinearGradient(0, 0, Math.cos(ang) * rayLen, Math.sin(ang) * rayLen);
+        rayGrad.addColorStop(0, 'rgba(255, 255, 255, 0.95)');
+        rayGrad.addColorStop(0.25, 'rgba(250, 204, 21, 0.7)');
+        rayGrad.addColorStop(0.65, 'rgba(192, 132, 252, 0.4)');
+        rayGrad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+
+        ctx.fillStyle = rayGrad;
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.lineTo(Math.cos(ang - 0.12) * rayLen, Math.sin(ang - 0.12) * rayLen);
+        ctx.lineTo(Math.cos(ang + 0.12) * rayLen, Math.sin(ang + 0.12) * rayLen);
+        ctx.closePath();
+        ctx.fill();
+      }
+
+      // Celestial Aura backdrop
+      const auraPulse = 1.0 + 0.15 * Math.sin(gameTime * 4);
+      const coreAura = ctx.createRadialGradient(0, 0, 20, 0, 0, 190 * auraPulse);
+      coreAura.addColorStop(0, '#ffffff');
+      coreAura.addColorStop(0.35, 'rgba(250, 204, 21, 0.85)');
+      coreAura.addColorStop(0.7, 'rgba(168, 85, 247, 0.5)');
+      coreAura.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = coreAura;
+      ctx.beginPath();
+      ctx.arc(0, 0, 190 * auraPulse, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Size of Santiscat
+      const drawW = 180;
+      const drawH = 180;
+
+      // Draw Santiscat Sprite with maximum clarity
+      if (this.santiscatImg && this.santiscatImg.complete && this.santiscatImg.naturalWidth > 0) {
+        ctx.save();
+        ctx.shadowColor = '#ffffff';
+        ctx.shadowBlur = 35;
+        ctx.drawImage(this.santiscatImg, -drawW / 2, -drawH / 2, drawW, drawH);
+        ctx.restore();
+      } else {
+        // Fallback procedural square cat matching the doodle
+        ctx.fillStyle = '#e2e8f0';
+        ctx.strokeStyle = '#000000';
+        ctx.lineWidth = 5;
+        ctx.beginPath();
+        ctx.roundRect(-drawW / 2, -drawH / 2, drawW, drawH, 16);
+        ctx.fill();
+        ctx.stroke();
+
+        // Ears
+        ctx.beginPath();
+        ctx.moveTo(-drawW / 2 + 15, -drawH / 2);
+        ctx.lineTo(-drawW / 2 + 35, -drawH / 2 - 38);
+        ctx.lineTo(-drawW / 2 + 55, -drawH / 2);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.moveTo(drawW / 2 - 55, -drawH / 2);
+        ctx.lineTo(drawW / 2 - 35, -drawH / 2 - 38);
+        ctx.lineTo(drawW / 2 - 15, -drawH / 2);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+
+        // Mouth :3
+        ctx.font = '900 32px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillStyle = '#000000';
+        ctx.fillText('ω', 0, 28);
+      }
+
+      // Wide glowing defeat eyes (magenta / pink cosmic desperation)
+      ctx.fillStyle = '#ec4899';
+      ctx.shadowColor = '#f43f5e';
+      ctx.shadowBlur = 24;
+      ctx.beginPath();
+      ctx.arc(-32, -25, 10, 0, Math.PI * 2);
+      ctx.arc(32, -25, 10, 0, Math.PI * 2);
+      ctx.fill();
+      // White inner pupil reflection
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(-32, -25, 4, 0, Math.PI * 2);
+      ctx.arc(32, -25, 4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+
+      // Floating Circular Hands (Paws) shivering
+      const pawBob = Math.sin(gameTime * 8) * 6;
+      ctx.fillStyle = '#f1f5f9';
+      ctx.strokeStyle = '#0f172a';
+      ctx.lineWidth = 4;
+      // Left Hand
+      ctx.beginPath();
+      ctx.arc(-drawW / 2 - 25, 30 + pawBob, 18, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      // Right Hand
+      ctx.beginPath();
+      ctx.arc(drawW / 2 + 25, 30 - pawBob, 18, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+
+      // Energy fissures / cosmic cracks leaking bright light
+      ctx.strokeStyle = '#fef08a';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(-40, -50);
+      ctx.lineTo(-10, -10);
+      ctx.lineTo(15, -25);
+      ctx.lineTo(35, 40);
+      ctx.stroke();
+
+      ctx.strokeStyle = '#a855f7';
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.moveTo(30, -55);
+      ctx.lineTo(5, -15);
+      ctx.lineTo(-20, 20);
+      ctx.lineTo(-45, 35);
+      ctx.stroke();
+
+      // Boss Label & 0 HP Defeated Health Bar
+      const barW = 220;
+      const barH = 10;
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.75)';
+      ctx.strokeStyle = '#f43f5e';
+      ctx.lineWidth = 2;
+      ctx.fillRect(-barW / 2, -drawH / 2 - 35, barW, barH);
+      ctx.strokeRect(-barW / 2, -drawH / 2 - 35, barW, barH);
+
+      ctx.fillStyle = '#f43f5e';
+      ctx.font = '900 12px Orbitron, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('👑 SANTISCAT - REY CÓSMICO (0 / 99,999 HP)', 0, -drawH / 2 - 42);
+
+      ctx.restore();
+    }
+
+    // 4. Liberated 12 Human Souls spiraling in radiant helices around cx, cy
+    c.souls.forEach((s) => {
+      const sx = cx + Math.cos(s.angle) * s.distance;
+      const sy = cy + Math.sin(s.angle) * s.distance;
+
+      ctx.save();
+      ctx.translate(sx, sy);
+
+      // Soul aura
+      const sGrad = ctx.createRadialGradient(0, 0, 4, 0, 0, 36 * s.scale);
+      sGrad.addColorStop(0, '#ffffff');
+      sGrad.addColorStop(0.4, s.color);
+      sGrad.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = sGrad;
+      ctx.beginPath();
+      ctx.arc(0, 0, 36 * s.scale, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Undertale-style heart shape
+      ctx.fillStyle = s.color;
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 2.5;
+      const hSize = 18 * s.scale;
+      ctx.beginPath();
+      ctx.moveTo(0, -hSize / 4);
+      ctx.bezierCurveTo(0, -hSize / 2, -hSize / 2, -hSize / 2, -hSize / 2, -hSize / 4);
+      ctx.bezierCurveTo(-hSize / 2, 0, 0, hSize / 4, 0, hSize / 2);
+      ctx.bezierCurveTo(0, hSize / 4, hSize / 2, 0, hSize / 2, -hSize / 4);
+      ctx.bezierCurveTo(hSize / 2, -hSize / 2, 0, -hSize / 2, 0, -hSize / 4);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+
+      // Soul Name tag in Latin Undertale font
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 11px Orbitron, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.shadowColor = s.color;
+      ctx.shadowBlur = 8;
+      ctx.fillText(s.name, 0, -hSize - 6);
+      ctx.shadowBlur = 0;
+
+      ctx.restore();
+    });
+
+    // 5. Phase 3: Procedural Inward Vortex Implosion Rings
+    if (c.phase === 'shader_implosion' || c.implosionProgress > 0) {
+      ctx.save();
+      ctx.translate(cx, cy);
+
+      const ringCount = 10;
+      for (let r = 0; r < ringCount; r++) {
+        const ringProgress = (r / ringCount - c.implosionProgress * 1.5 + 2) % 1.0;
+        const ringDist = ringProgress * 420;
+        const alpha = (1.0 - ringProgress) * c.implosionProgress;
+
+        ctx.strokeStyle = r % 2 === 0 ? `rgba(255, 255, 255, ${alpha})` : `rgba(168, 85, 247, ${alpha})`;
+        ctx.lineWidth = 3 + (1.0 - ringProgress) * 4;
+        ctx.beginPath();
+        ctx.arc(0, 0, ringDist, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+
+      // Singularity Black Hole event horizon at center
+      const singSize = 25 * (1.0 + c.implosionProgress * 0.5);
+      ctx.fillStyle = '#000000';
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.arc(0, 0, singSize, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.restore();
+    }
+
+    // 6. Phase 4: Colossal Supernova Explosion Shockwaves
+    if (c.phase === 'giant_explosion' && c.explosionRadius > 0) {
+      ctx.save();
+      ctx.translate(cx, cy);
+
+      // Multiple colored shockwave rings
+      const rings = [
+        { r: c.explosionRadius, color: 'rgba(255, 255, 255, 0.95)', width: 14 },
+        { r: c.explosionRadius * 0.85, color: 'rgba(250, 204, 21, 0.85)', width: 12 },
+        { r: c.explosionRadius * 0.68, color: 'rgba(192, 132, 252, 0.75)', width: 10 },
+        { r: c.explosionRadius * 0.5, color: 'rgba(56, 189, 248, 0.65)', width: 8 },
+      ];
+
+      rings.forEach(ring => {
+        ctx.strokeStyle = ring.color;
+        ctx.lineWidth = ring.width;
+        ctx.beginPath();
+        ctx.arc(0, 0, ring.r, 0, Math.PI * 2);
+        ctx.stroke();
+      });
+
+      // Internal stellar blast fire gradient
+      const blastGrad = ctx.createRadialGradient(0, 0, 10, 0, 0, c.explosionRadius * 0.9);
+      blastGrad.addColorStop(0, 'rgba(255, 255, 255, 0.9)');
+      blastGrad.addColorStop(0.3, 'rgba(251, 191, 36, 0.7)');
+      blastGrad.addColorStop(0.7, 'rgba(239, 68, 68, 0.4)');
+      blastGrad.addColorStop(1, 'rgba(168, 85, 247, 0)');
+      ctx.fillStyle = blastGrad;
+      ctx.beginPath();
+      ctx.arc(0, 0, c.explosionRadius * 0.9, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.restore();
+    }
+
+    // 7. Fullscreen White / Cosmic Flash
+    if (c.flashAlpha > 0.01) {
+      ctx.fillStyle = `rgba(255, 255, 255, ${c.flashAlpha})`;
+      ctx.fillRect(0, 0, this.width, this.height);
+    }
+
+    // 8. Player Drawing & Emerald Shield Bubble in cinematic
+    ctx.save();
+    const playerCinematicX = cx - 260;
+    const playerCinematicY = cy + 40;
+    ctx.translate(playerCinematicX, playerCinematicY);
+
+    const cinematicPlayer: Player = {
+      ...player,
+      x: 0,
+      y: 0,
+      facing: 1,
+    };
+    this.drawPlayer(cinematicPlayer, gameTime);
+
+    // If shield active, draw radiant emerald bubble
+    if (player.shieldActive) {
+      const shieldPulse = 54 + Math.sin(gameTime * 8) * 4;
+      const shGrad = ctx.createRadialGradient(0, 0, 15, 0, 0, shieldPulse);
+      shGrad.addColorStop(0, 'rgba(16, 185, 129, 0.2)');
+      shGrad.addColorStop(0.7, 'rgba(16, 185, 129, 0.5)');
+      shGrad.addColorStop(1, 'rgba(52, 211, 153, 0.95)');
+      ctx.fillStyle = shGrad;
+      ctx.strokeStyle = '#34d399';
+      ctx.lineWidth = 3.5;
+      ctx.beginPath();
+      ctx.arc(0, 0, shieldPulse, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+
+      // Shield label
+      ctx.fillStyle = '#34d399';
+      ctx.font = '900 11px Orbitron, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.shadowColor = '#059669';
+      ctx.shadowBlur = 8;
+      ctx.fillText('🛡️ ESCUDO ACTIVO', 0, shieldPulse + 18);
+      ctx.shadowBlur = 0;
+    } else {
+      const unshieldedBlink = Math.floor(gameTime * 6) % 2 === 0;
+      if (c.phase === 'shield_warning' && unshieldedBlink) {
+        ctx.fillStyle = '#ef4444';
+        ctx.font = '900 11px Orbitron, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('⚠️ ¡SIN ESCUDO!', 0, -45);
+      }
+    }
+    ctx.restore();
+
+    // 9. Hazard Alert Text in letterbox bars & overlay
+    ctx.textAlign = 'center';
+    if (c.phase === 'shining_souls_release') {
+      ctx.fillStyle = '#facc15';
+      ctx.font = '900 20px Orbitron, sans-serif';
+      ctx.fillText('✨ ¡SANTISCAT HA SIDO DERROTADO! ¡LIBERACIÓN CÓSMICA! ✨', this.width / 2, barHeight - 16);
+      ctx.fillStyle = '#e2e8f0';
+      ctx.font = '600 13px Fredoka, sans-serif';
+      ctx.fillText('Las 12 almas humanas absorbidas se desprenden en espirales de luz pura...', this.width / 2, this.height - barHeight + 28);
+
+    } else if (c.phase === 'shield_warning') {
+      // Blinking Emergency Alert
+      const blink = Math.floor(gameTime * 6) % 2 === 0;
+      ctx.fillStyle = blink ? '#ef4444' : '#fbbf24';
+      ctx.font = '900 22px Orbitron, sans-serif';
+      ctx.fillText('⚠️ ¡ALERTA CÓSMICA! ¡COLAPSO INMINENTE DE SANTISCAT! ⚠️', this.width / 2, barHeight - 16);
+
+      // Warning Subtitle
+      ctx.fillStyle = '#ffffff';
+      ctx.font = '700 15px Fredoka, sans-serif';
+      ctx.fillText('🛡️ ¡ACTIVA TU ESCUDO (SHIFT / K) PARA PROTEGERTE DE LA EXPLOSIÓN GIGANTESCA! 🛡️', this.width / 2, barHeight + 34);
+
+      // Countdown in bottom bar
+      const timeLeft = Math.max(0, 7.0 - c.timer).toFixed(1);
+      ctx.fillStyle = '#f87171';
+      ctx.font = '900 16px Orbitron, sans-serif';
+      ctx.fillText(`💥 IMPLOSIÓN EN: ${timeLeft}s | ESTADO DE ESCUDO: ${player.shieldActive ? '🛡️ ACTIVO (PROTEGIDO)' : '⚠️ DESACTIVADO'}`, this.width / 2, this.height - barHeight + 28);
+
+    } else if (c.phase === 'shader_implosion') {
+      ctx.fillStyle = '#c084fc';
+      ctx.font = '900 22px Orbitron, sans-serif';
+      ctx.fillText('🌌 ¡IMPLOSIÓN ESPACIO-TEMPORAL! LA REALIDAD COLAPSA... 🌌', this.width / 2, barHeight - 16);
+      ctx.fillStyle = '#e0e7ff';
+      ctx.font = '600 14px Fredoka, sans-serif';
+      ctx.fillText('Toda la energía cósmica está siendo comprimida en una singularidad...', this.width / 2, this.height - barHeight + 28);
+
+    } else if (c.phase === 'giant_explosion') {
+      ctx.fillStyle = '#fbbf24';
+      ctx.font = '900 22px Orbitron, sans-serif';
+      ctx.fillText('💥 ¡GRAN ESTALLIDO CÓSMICO DE SUPERNOVA! 💥', this.width / 2, barHeight - 16);
+      ctx.fillStyle = '#ffffff';
+      ctx.font = '700 14px Fredoka, sans-serif';
+      ctx.fillText(player.shieldActive ? '🛡️ ¡Tu escudo soportó la onda expansiva cósmica!' : '¡Santiscat ha sido erradicado del continuo espacio-tiempo!', this.width / 2, this.height - barHeight + 28);
+    }
+
+    // Skip cinematic hint
+    ctx.fillStyle = '#94a3b8';
+    ctx.font = '500 11px Fredoka, sans-serif';
+    ctx.fillText('[ Presiona ESPACIO para saltar cinemática ]', this.width / 2, this.height - 10);
+
+    ctx.restore();
+  }
 }
+

@@ -15,7 +15,15 @@ import { VictoryModal } from './components/VictoryModal';
 import { GameOverModal } from './components/GameOverModal';
 import { AudioSettingsModal } from './components/AudioSettingsModal';
 import { AdminPanelModal } from './components/AdminPanelModal';
+import { RoomModal } from './components/RoomModal';
+import { SpectatorOverlay } from './components/SpectatorOverlay';
+import { PlayerHealthScoreboard } from './components/PlayerHealthScoreboard';
+import { AchievementsModal } from './components/AchievementsModal';
+import { MissionsModal } from './components/MissionsModal';
+import { AchievementToast } from './components/AchievementToast';
+import { multiplayerClient } from './game/multiplayerClient';
 import { GameStage } from './types/game';
+import { canAccessAdminPanel } from './game/achievements';
 import {
   CharacterSkinId,
   getSavedSelectedSkin,
@@ -31,9 +39,21 @@ export default function App() {
   const distortionPipelineRef = useRef<DistortionShaderPipeline | null>(null);
 
   const [stage, setStage] = useState<GameStage>('start');
+  const activeStageRef = useRef<GameStage>('start');
   const [isMuted, setIsMuted] = useState<boolean>(false);
   const [isAudioModalOpen, setIsAudioModalOpen] = useState<boolean>(false);
   const [isAdminModalOpen, setIsAdminModalOpen] = useState<boolean>(false);
+  const [isRoomModalOpen, setIsRoomModalOpen] = useState<boolean>(true);
+  const [isScoreboardOpen, setIsScoreboardOpen] = useState<boolean>(false);
+  const [isAchievementsOpen, setIsAchievementsOpen] = useState<boolean>(false);
+  const [isMissionsOpen, setIsMissionsOpen] = useState<boolean>(false);
+  const [isMultiplayer, setIsMultiplayer] = useState<boolean>(false);
+  const [showTouchControls, setShowTouchControls] = useState<boolean>(() => {
+    return (
+      /Android|iPhone|iPad|iPod|webOS|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ||
+      (typeof window !== 'undefined' && window.innerWidth < 1024)
+    );
+  });
   const [selectedSkin, setSelectedSkin] = useState<CharacterSkinId>(() => getSavedSelectedSkin());
   const [nanovalenWins, setNanovalenWinsState] = useState<number>(() => getSavedNanovalenWins());
   const [adminUnlockAll, setAdminUnlockAllState] = useState<boolean>(() => getAdminUnlockAll());
@@ -95,10 +115,22 @@ export default function App() {
 
     // Keyboard controls
     const onKeyDown = (e: KeyboardEvent) => {
+      // Player Health Scoreboard Hotkey (Tab)
+      if (e.code === 'Tab') {
+        e.preventDefault();
+        setIsScoreboardOpen((prev) => !prev);
+        return;
+      }
+
       // Admin Panel Hotkey (F1 or Backquote `)
       if (e.code === 'F1' || e.code === 'Backquote') {
         e.preventDefault();
-        setIsAdminModalOpen((prev) => !prev);
+        const isHost = engine.isHostPlayer();
+        if (canAccessAdminPanel(isHost)) {
+          setIsAdminModalOpen((prev) => !prev);
+        } else {
+          setIsAchievementsOpen(true);
+        }
         return;
       }
 
@@ -114,6 +146,16 @@ export default function App() {
 
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
+
+    // Callbacks for immediate stage sync on victory or game over
+    engine.onVictoryCallback = () => {
+      activeStageRef.current = 'victory';
+      setStage('victory');
+    };
+    engine.onGameOverCallback = () => {
+      activeStageRef.current = 'gameover';
+      setStage('gameover');
+    };
 
     // Main 60fps Game Loop
     let lastTime = performance.now();
@@ -141,11 +183,19 @@ export default function App() {
       }
 
       const gameTime = currentTime / 1000;
-      const isLevel4 = engine.stage === 'distorted' || engine.stage === 'rhythm_summon' || engine.stage === 'santiscat_boss';
+      const isLevel4 =
+        engine.stage === 'distorted' ||
+        engine.stage === 'rhythm_summon' ||
+        engine.stage === 'santiscat_boss' ||
+        engine.stage === 'santiscat_boss_wormhole' ||
+        engine.stage === 'santiscat_boss_universe';
 
       if (engine.stage === 'cinematic_earth_destruction' && engine.cinematic) {
         // Render apocalyptic Earth Destruction cinematic
         renderer.drawEarthDestructionCinematic(engine.cinematic, gameTime);
+      } else if (engine.stage === 'cinematic_santiscat_defeat' && engine.santiscatDefeatCinematic) {
+        // Render Santiscat Final Defeat Cinematic (Super bright light, 12 souls, implosion, giant supernova explosion)
+        renderer.drawSantiscatDefeatCinematic(engine.santiscatDefeatCinematic, gameTime, engine.player);
       } else {
         // 1. Background (City, Space nebula or Distorted void)
         renderer.drawBackground(engine.stage, gameTime);
@@ -157,7 +207,7 @@ export default function App() {
         }
 
         // Level 4 Altar, Glitches & Rhythm Minigame
-        if (isLevel4) {
+        if (isLevel4 && (engine.stage === 'distorted' || engine.stage === 'rhythm_summon')) {
           const distToAltar = Math.hypot(engine.player.x - 1600, engine.player.y - 1200);
           renderer.drawSpacetimeAltar(1600, 1200, gameTime, distToAltar);
           renderer.drawRealityGlitches(engine.glitches, gameTime);
@@ -182,13 +232,25 @@ export default function App() {
           renderer.drawBoss(engine.boss, gameTime, engine.player.x, engine.player.y);
         }
 
-        // 4.5 Boss Santiscat (Level 4 Cosmic Boss)
-        if (engine.santiscat && engine.stage === 'santiscat_boss') {
+        // 4.5 Boss Santiscat (Level 4 Cosmic Boss - Phase 1, Phase 2 Wormhole, Phase 2.5 Universe)
+        if (
+          engine.santiscat &&
+          (engine.stage === 'santiscat_boss' || engine.stage === 'santiscat_boss_wormhole' || engine.stage === 'santiscat_boss_universe')
+        ) {
           renderer.drawSantiscat(engine.santiscat, gameTime, engine.player.x, engine.player.y);
         }
 
         // 5. Catvalen Player
-        renderer.drawPlayer(engine.player, gameTime);
+        if (!engine.isSpectating) {
+          renderer.drawPlayer(engine.player, gameTime);
+        }
+
+        // 5.5 Remote Multiplayer Players
+        if (engine.isMultiplayer) {
+          engine.remotePlayers.forEach((remPlayer) => {
+            renderer.drawRemotePlayer(remPlayer, gameTime, engine.spectatingTargetId === remPlayer.id);
+          });
+        }
 
         // 6. Black Flash critical lightning strikes & inverted flash
         renderer.drawBlackFlashStrikes(engine.blackFlashStrikes);
@@ -213,13 +275,28 @@ export default function App() {
       // Distorts spacetime around black holes, reality slashes, and chromatic glitches
       // leaves HTML/React UI 100% crisp and un-distorted on top
       let blackHoleUniforms = undefined;
-      if (engine.santiscat?.blackHole.active && engine.santiscat.blackHole.phase === 'black_hole_active') {
+      if (
+        engine.santiscat &&
+        (engine.santiscat.blackHole.active || engine.santiscat.currentAttack === 'black_hole_chase' || engine.santiscat.currentAttack === 'compress_black_hole') &&
+        engine.santiscat.blackHole.phase !== 'sun_charging'
+      ) {
         blackHoleUniforms = {
           active: true,
           screenX: engine.santiscat.blackHole.x - engine.camera.x,
           screenY: engine.santiscat.blackHole.y - engine.camera.y,
-          radius: engine.santiscat.blackHole.radius * 1.6,
-          mass: 2.2,
+          radius: (engine.santiscat.blackHole.radius || 48) * 1.5,
+          mass: 2.4,
+        };
+      }
+
+      let hollowPurpleUniforms = undefined;
+      if (engine.santiscat?.gojoTechniques?.purple.active && engine.santiscat.gojoTechniques.purple.phase === 'fired') {
+        const pur = engine.santiscat.gojoTechniques.purple;
+        hollowPurpleUniforms = {
+          active: true,
+          screenX: pur.x - engine.camera.x,
+          screenY: pur.y - engine.camera.y,
+          radius: pur.radius * 1.5,
         };
       }
 
@@ -238,15 +315,56 @@ export default function App() {
         glitchStrength = 0.012 + (engine.screenShake > 0 ? 0.04 : 0);
       }
 
-      if (distortionPipeline.isAvailable() && (blackHoleUniforms?.active || slashUniforms.length > 0 || isLevel4)) {
-        distortionPipeline.render(offscreenCanvas, gameTime, blackHoleUniforms, glitchStrength, slashUniforms);
+      const isWormhole = engine.stage === 'santiscat_boss_wormhole';
+      const wormholeUniforms = isWormhole ? {
+        active: true,
+        speed: 1.8,
+        centerScreenX: width / 2,
+        centerScreenY: height / 2,
+        hueShift: gameTime * 0.12,
+      } : undefined;
+
+      let implosionUniforms = undefined;
+      if (
+        engine.santiscatDefeatCinematic?.active &&
+        (engine.santiscatDefeatCinematic.phase === 'shader_implosion' || engine.santiscatDefeatCinematic.implosionProgress > 0)
+      ) {
+        implosionUniforms = {
+          active: true,
+          screenX: width / 2,
+          screenY: height / 2 - 25,
+          progress: engine.santiscatDefeatCinematic.implosionProgress,
+          radius: 650,
+        };
+      }
+
+      const hasDistortion =
+        blackHoleUniforms?.active ||
+        hollowPurpleUniforms?.active ||
+        slashUniforms.length > 0 ||
+        isLevel4 ||
+        isWormhole ||
+        implosionUniforms?.active;
+
+      if (distortionPipeline.isAvailable() && hasDistortion) {
+        distortionPipeline.render(
+          offscreenCanvas,
+          gameTime,
+          blackHoleUniforms,
+          glitchStrength,
+          slashUniforms,
+          hollowPurpleUniforms,
+          wormholeUniforms,
+          implosionUniforms
+        );
         displayCtx.drawImage(distortionPipeline.getCanvas(), 0, 0);
       } else {
         displayCtx.drawImage(offscreenCanvas, 0, 0);
       }
 
-      // Sync stage state if changed internally
-      if (engine.stage !== stage && (engine.stage === 'gameover' || engine.stage === 'victory' || engine.stage === 'cinematic_earth_destruction')) {
+      // Sync stage state if changed internally (including transitions to wormhole, universe, victory, gameover)
+      if (engine.stage !== activeStageRef.current) {
+        activeStageRef.current = engine.stage;
         setStage(engine.stage);
       }
 
@@ -306,10 +424,31 @@ export default function App() {
 
   const handleStartGame = useCallback(() => {
     if (!engineRef.current) return;
+    setIsMultiplayer(false);
+    setIsRoomModalOpen(false);
+    engineRef.current.setupMultiplayer(false, '');
     engineRef.current.selectSkin(selectedSkin);
     engineRef.current.resetGame();
     setStage('city');
   }, [selectedSkin]);
+
+  const handleStartMultiplayerGame = useCallback(() => {
+    if (!engineRef.current) return;
+    setIsMultiplayer(true);
+    setIsRoomModalOpen(false);
+    engineRef.current.selectSkin(selectedSkin);
+    engineRef.current.setupMultiplayer(true, multiplayerClient.myPlayerId || '');
+    engineRef.current.resetGame();
+    setStage('city');
+  }, [selectedSkin]);
+
+  const handleCloseRoomModalSolo = useCallback(() => {
+    setIsRoomModalOpen(false);
+    setIsMultiplayer(false);
+    if (engineRef.current) {
+      engineRef.current.setupMultiplayer(false, '');
+    }
+  }, []);
 
   const handleRetry = useCallback(() => {
     if (!engineRef.current) return;
@@ -327,6 +466,7 @@ export default function App() {
       setSelectedSkin(engineRef.current.currentSkin);
     }
     setStage('start');
+    setIsRoomModalOpen(true);
   }, []);
 
   const handleRematchBoss = useCallback(() => {
@@ -345,6 +485,12 @@ export default function App() {
     if (!engineRef.current) return;
     engineRef.current.startStage('distorted');
     setStage('distorted');
+  }, []);
+
+  const handleRematchSantiscat = useCallback(() => {
+    if (!engineRef.current) return;
+    engineRef.current.rematchSantiscat();
+    setStage('santiscat_boss');
   }, []);
 
   const handleToggleMute = useCallback(() => {
@@ -374,18 +520,52 @@ export default function App() {
           onSpecial2={() => engineRef.current?.performSpecial2()}
           onOpenAudioModal={() => setIsAudioModalOpen(true)}
           onOpenAdminModal={() => setIsAdminModalOpen(true)}
+          onOpenScoreboard={() => setIsScoreboardOpen(true)}
+          onOpenAchievements={() => setIsAchievementsOpen(true)}
+          onOpenMissions={() => setIsMissionsOpen(true)}
+          onRematchSantiscat={handleRematchSantiscat}
           isMuted={isMuted}
           onToggleMute={handleToggleMute}
+          showTouchControls={showTouchControls}
+          onToggleTouchControls={() => setShowTouchControls((prev) => !prev)}
         />
       )}
 
-      {/* Mobile Touch Joystick */}
-      {engineRef.current && stage !== 'start' && stage !== 'victory' && stage !== 'gameover' && stage !== 'cinematic_earth_destruction' && (
-        <TouchControls engine={engineRef.current} />
+      {/* Spectator Mode Overlay (When player falls in multiplayer) */}
+      {engineRef.current && engineRef.current.isSpectating && (
+        <SpectatorOverlay
+          engine={engineRef.current}
+          onNextTarget={() => engineRef.current?.spectateNext()}
+          onPrevTarget={() => engineRef.current?.spectatePrev()}
+        />
       )}
 
-      {/* Welcome / Start Screen with Skin Selector & Admin Button */}
-      {stage === 'start' && (
+      {/* Mobile Touch Joystick & Action Buttons */}
+      {showTouchControls && engineRef.current && stage !== 'start' && stage !== 'victory' && stage !== 'gameover' && stage !== 'cinematic_earth_destruction' && (
+        <TouchControls
+          engine={engineRef.current}
+          onPunch={() => engineRef.current?.performPunch()}
+          onFireball={() => engineRef.current?.performFireball()}
+          onLightning={() => engineRef.current?.performLightning()}
+          onPowerBurst={() => engineRef.current?.performPowerBurst()}
+          onShield={() => engineRef.current?.activateShield()}
+          onHeal={() => engineRef.current?.performHeal()}
+          onSpecial1={() => engineRef.current?.performSpecial1()}
+          onSpecial2={() => engineRef.current?.performSpecial2()}
+        />
+      )}
+
+      {/* Multiplayer Local Room Lobby Modal (Prior to skin selection / game start) */}
+      <RoomModal
+        isOpen={isRoomModalOpen && stage === 'start'}
+        onCloseSolo={handleCloseRoomModalSolo}
+        onGameStart={handleStartMultiplayerGame}
+        selectedSkin={selectedSkin}
+        onSelectSkin={handleSelectSkin}
+      />
+
+      {/* Welcome / Start Screen with Skin Selector & Admin Button (Solo / Offline Play) */}
+      {stage === 'start' && !isRoomModalOpen && (
         <StartModal
           onStart={handleStartGame}
           selectedSkin={selectedSkin}
@@ -395,6 +575,9 @@ export default function App() {
           onSetWins={handleSetWins}
           onOpenAudioModal={() => setIsAudioModalOpen(true)}
           onOpenAdminModal={() => setIsAdminModalOpen(true)}
+          onOpenRoomModal={() => setIsRoomModalOpen(true)}
+          onOpenAchievements={() => setIsAchievementsOpen(true)}
+          onOpenMissions={() => setIsMissionsOpen(true)}
         />
       )}
 
@@ -413,13 +596,66 @@ export default function App() {
         </div>
       )}
 
+      {/* Cinematic Santiscat Defeat Overlay & Emergency Shield Prompt */}
+      {stage === 'cinematic_santiscat_defeat' && engineRef.current?.santiscatDefeatCinematic && (
+        <div className="absolute inset-0 pointer-events-none flex flex-col justify-between p-4 z-40">
+          {/* Top Alert Banner */}
+          {engineRef.current.santiscatDefeatCinematic.phase === 'shield_warning' && (
+            <div className="mx-auto mt-14 max-w-md w-full bg-red-950/90 border-2 border-red-500 rounded-2xl p-3 text-center shadow-2xl backdrop-blur-md pointer-events-auto animate-bounce">
+              <div className="text-red-400 font-black text-sm tracking-wide mb-1">
+                ⚠️ ¡ALERTA CÓSMICA! COLAPSO INMINENTE ⚠️
+              </div>
+              <div className="text-white text-xs font-bold mb-2">
+                ¡Activa tu escudo para protegerte de la explosión gigantesca!
+              </div>
+              <button
+                onClick={() => {
+                  engineRef.current?.activateShield();
+                }}
+                className={`w-full py-2.5 px-4 rounded-xl font-black text-sm tracking-wider uppercase transition-transform active:scale-95 shadow-lg ${
+                  engineRef.current.player.shieldActive
+                    ? 'bg-emerald-600 text-white shadow-emerald-500/30'
+                    : 'bg-red-600 hover:bg-red-500 text-white shadow-red-500/40 animate-pulse'
+                }`}
+              >
+                {engineRef.current.player.shieldActive
+                  ? '🛡️ ¡ESCUDO ACTIVADO (PROTEGIDO)!'
+                  : '🛡️ ¡TOCA AQUÍ PARA ACTIVAR ESCUDO!'}
+              </button>
+            </div>
+          )}
+
+          {/* Bottom Skip button */}
+          <div className="self-end mt-auto pointer-events-auto">
+            <button
+              onClick={() => {
+                engineRef.current?.skipSantiscatDefeatCinematic();
+              }}
+              className="px-4 py-2 bg-neutral-900/80 hover:bg-neutral-800 text-neutral-300 hover:text-white rounded-xl border border-neutral-700 text-xs font-bold transition-all shadow-lg active:scale-95 cursor-pointer backdrop-blur-md"
+            >
+              Saltar Cinemática [Espacio] ➔
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Victory Screen ("¡Ganaste!") */}
       {stage === 'victory' && engineRef.current && (
         <VictoryModal
           stats={engineRef.current.stats}
-          isSantiscatDefeated={(engineRef.current.stats.santiscatWins || 0) > 0 || (engineRef.current.stats.santiscatDamageDealt || 0) > 0}
+          isSantiscatDefeated={
+            (engineRef.current.stats.santiscatWins || 0) > 0 ||
+            (engineRef.current.santiscatWins || 0) > 0 ||
+            engineRef.current.lastBattleStage === 'santiscat_boss_universe' ||
+            engineRef.current.lastBattleStage === 'santiscat_boss_wormhole' ||
+            engineRef.current.lastBattleStage === 'santiscat_boss'
+          }
           onPlayAgain={handleStartGame}
-          onRematchBoss={handleRematchBoss}
+          onRematchBoss={
+            (engineRef.current.stats.santiscatWins || 0) > 0
+              ? handleRematchSantiscat
+              : handleRematchBoss
+          }
           onMainMenu={handleReturnToMenu}
           onNextLevel={handleNextLevel}
         />
@@ -431,7 +667,15 @@ export default function App() {
           stage={engineRef.current?.stage || 'city'}
           deathReason={engineRef.current?.stats.deathReason}
           bossBlackFlashesCount={engineRef.current?.stats.bossBlackFlashesCount}
+          isSantiscatBattle={
+            engineRef.current?.lastBattleStage === 'santiscat_boss' ||
+            engineRef.current?.santiscat !== null ||
+            engineRef.current?.stats.deathReason === 'santiscat_oneshot' ||
+            engineRef.current?.stats.deathReason === 'black_hole' ||
+            engineRef.current?.stats.deathReason === 'reality_tear'
+          }
           onRetry={handleRetry}
+          onRetrySantiscat={handleRematchSantiscat}
           onMainMenu={handleReturnToMenu}
         />
       )}
@@ -457,6 +701,32 @@ export default function App() {
         currentStage={stage}
         onJumpStage={handleJumpStage}
       />
+
+      {/* Player Health Scoreboard Modal (Live HP table of all players) */}
+      {engineRef.current && (
+        <PlayerHealthScoreboard
+          isOpen={isScoreboardOpen}
+          onClose={() => setIsScoreboardOpen(false)}
+          engine={engineRef.current}
+        />
+      )}
+
+      {/* Achievements System Modal */}
+      <AchievementsModal
+        isOpen={isAchievementsOpen}
+        onClose={() => setIsAchievementsOpen(false)}
+        isHost={engineRef.current ? engineRef.current.isHostPlayer() : true}
+      />
+
+      {/* Secondary Missions System Modal */}
+      <MissionsModal
+        isOpen={isMissionsOpen}
+        onClose={() => setIsMissionsOpen(false)}
+        onQuestsUpdated={() => setTick((t) => t + 1)}
+      />
+
+      {/* Floating Achievement Unlock Notification Toast */}
+      <AchievementToast />
     </div>
   );
 }

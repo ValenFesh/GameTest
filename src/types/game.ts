@@ -8,9 +8,12 @@ export type GameStage =
   | 'victory'
   | 'gameover'
   | 'cinematic_earth_destruction'
+  | 'cinematic_santiscat_defeat'
   | 'distorted'
   | 'rhythm_summon'
-  | 'santiscat_boss';
+  | 'santiscat_boss'
+  | 'santiscat_boss_wormhole'
+  | 'santiscat_boss_universe';
 
 export type CharacterSkinId =
   | 'catvalen'
@@ -51,6 +54,7 @@ export interface Player {
   shieldCooldown: number; // seconds remaining
   shieldMaxCooldown: number;
   shieldColor?: string;
+  holdingShield?: boolean;
   // Floating circular paws
   leftHand: { x: number; y: number; punchProgress: number };
   rightHand: { x: number; y: number; punchProgress: number };
@@ -136,6 +140,7 @@ export interface Projectile {
   height?: number;
   scale?: number;
   targetId?: string;
+  targetY?: number;
 }
 
 export interface Obstacle {
@@ -288,6 +293,41 @@ export interface CinematicState {
   flashAlpha: number;
 }
 
+export type SantiscatDefeatPhase =
+  | 'shining_souls_release'
+  | 'shield_warning'
+  | 'shader_implosion'
+  | 'giant_explosion'
+  | 'fade_to_victory';
+
+export interface SantiscatDefeatCinematicState {
+  active: boolean;
+  timer: number;
+  maxDuration: number;
+  phase: SantiscatDefeatPhase;
+  lightIntensity: number; // 0 to 1
+  implosionProgress: number; // 0 to 1
+  explosionRadius: number;
+  flashAlpha: number;
+  santiscatX: number;
+  santiscatY: number;
+  shieldActivatedInTime: boolean;
+  warningSoundPlayed?: boolean;
+  implosionSoundPlayed?: boolean;
+  explosionSoundPlayed?: boolean;
+  souls: {
+    id: string;
+    name: string;
+    color: string;
+    glowColor: string;
+    angle: number;
+    distance: number;
+    speed: number;
+    scale: number;
+    alpha: number;
+  }[];
+}
+
 export interface Camera {
   x: number;
   y: number;
@@ -371,7 +411,160 @@ export type SantiscatAttack =
   | 'black_hole_chase'
   | 'oneshot_fireball'
   | 'reality_slashes'
-  | 'dimensional_warp';
+  | 'dimensional_warp'
+  | 'summon_jujutsu_cats'
+  | 'absorbing_souls'
+  | 'wormhole_flight'
+  | 'rainbow_blast'
+  | 'spiral_galaxy'
+  | 'giant_stars'
+  | 'supernova_burst'
+  | 'omega_save_load';
+
+export interface MalevolentShrineCut {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  timer: number;
+  maxTimer: number;
+  alpha: number;
+}
+
+export interface MalevolentShrineState {
+  active: boolean;
+  chanting: boolean;
+  chantTimer: number; // 0 to 1.6s
+  timer: number;
+  maxDuration: number; // 7.0s
+  shrineX: number;
+  shrineY: number;
+  redIntensity: number; // 0 to 1
+  cuts: MalevolentShrineCut[];
+  damageTickTimer: number;
+}
+
+export interface GojoDebris {
+  id: string;
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  radius: number;
+  color: string;
+  angle: number;
+  rotationSpeed: number;
+  life: number;
+}
+
+export interface GojoTechniqueState {
+  blue: {
+    active: boolean;
+    x: number;
+    y: number;
+    radius: number;
+    suctionRadius: number;
+    timer: number;
+    maxDuration: number;
+    absorbedDebris: GojoDebris[];
+  };
+  red: {
+    active: boolean;
+    x: number;
+    y: number;
+    radius: number;
+    maxRadius: number;
+    timer: number;
+    maxDuration: number;
+    repelledDebris: GojoDebris[];
+  };
+  purple: {
+    active: boolean;
+    phase: 'charging' | 'fired' | 'exploded';
+    x: number;
+    y: number;
+    vx: number;
+    vy: number;
+    radius: number;
+    timer: number;
+    maxDuration: number;
+    blueOrb: { x: number; y: number };
+    redOrb: { x: number; y: number };
+    fusionProgress: number; // 0 to 1
+    distortionRadius: number;
+    trail: { x: number; y: number; alpha: number; size: number }[];
+  };
+}
+
+export interface JujutsuSummon {
+  id: 'sukunacat' | 'gojocat';
+  name: string;
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  width: number;
+  height: number;
+  hp: number;
+  maxHp: number;
+  facing: 1 | -1;
+  active: boolean;
+  state:
+    | 'spawning'
+    | 'idle'
+    | 'follow'
+    | 'dash'
+    | 'cleave_slashes'
+    | 'domain_chant'
+    | 'domain_active'
+    | 'lapse_blue'
+    | 'reversal_red'
+    | 'purple_charge'
+    | 'purple_fire'
+    | 'cooldown';
+  timer: number;
+  cooldownTimer: number;
+  chantText?: string;
+  dashTarget?: { x: number; y: number };
+  slashes: RealitySlash[];
+}
+
+export interface HumanSoul {
+  id: string;
+  name: string;
+  trait: string;
+  image: string;
+  color: string;
+  glowColor: string;
+  angle: number;
+  distance: number;
+  targetDistance: number;
+  scale: number;
+  alpha: number;
+  absorbed: boolean;
+}
+
+export interface OmegaSaveFile {
+  active: boolean;
+  hasSave: boolean;
+  stateText?: string;
+  textTimer: number;
+  savedPlayerX: number;
+  savedPlayerY: number;
+  savedPlayerHp: number;
+  savedAttack: SantiscatAttack;
+  loadTimer: number;
+}
+
+export interface RefusedToDieState {
+  active: boolean;
+  phase: 'idle' | 'heart_shattering' | 'heart_mending' | 'resurrected';
+  timer: number;
+  heartX: number;
+  heartY: number;
+  crackProgress: number;
+  alpha: number;
+}
 
 export interface SantiscatBoss {
   x: number;
@@ -381,7 +574,7 @@ export interface SantiscatBoss {
   width: number;
   height: number;
   hp: number;
-  maxHp: number; // 4800 HP
+  maxHp: number; // 15000 HP in Phase 1, 99999 HP in Phase 2 & 2.5
   shieldActive: boolean;
   shieldTimer: number;
   currentAttack: SantiscatAttack;
@@ -395,5 +588,63 @@ export interface SantiscatBoss {
   eyeState: 'happy' | 'menacing' | 'glowing';
   facing: 1 | -1;
   summonExplosionTimer?: number;
+  jujutsuSummons: JujutsuSummon[];
+  shrine: MalevolentShrineState;
+  gojoTechniques: GojoTechniqueState;
+  // --- FASE 2 & FASE 2.5 ADDITIONS ---
+  bossPhase: 1 | 2 | 2.5;
+  souls: HumanSoul[];
+  soulAbsorbTimer: number;
+  portalAngle: number;
+  portalScale: number;
+  wormholeProgress: number; // 0 to 100%
+  wormholeTimer: number;
+  rainbowBlast: {
+    active: boolean;
+    timer: number;
+    chargeDuration: number;
+    fireDuration: number;
+    beamWidth: number;
+    safeSide: 'top' | 'bottom' | 'center';
+    safeY: number;
+  };
+  galaxies: {
+    id: string;
+    x: number;
+    y: number;
+    vx: number;
+    vy: number;
+    radius: number;
+    rotation: number;
+    rotSpeed: number;
+    color: string;
+    life: number;
+    maxLife: number;
+  }[];
+  giantStars: {
+    id: string;
+    x: number;
+    y: number;
+    vx: number;
+    vy: number;
+    radius: number;
+    color: string;
+    explosionTimer: number;
+    exploded: boolean;
+    shockwaveRadius?: number;
+  }[];
+  supernovas: {
+    id: string;
+    x: number;
+    y: number;
+    radius: number;
+    maxRadius: number;
+    color: string;
+    life: number;
+    maxLife: number;
+  }[];
+  omegaSave: OmegaSaveFile;
+  refusedToDie: RefusedToDieState;
 }
+
 

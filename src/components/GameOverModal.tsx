@@ -7,7 +7,9 @@ interface GameOverModalProps {
   stage: GameStage;
   deathReason?: 'standard' | 'gamma_ray' | 'santiscat_oneshot' | 'black_hole' | 'reality_tear';
   bossBlackFlashesCount?: number;
+  isSantiscatBattle?: boolean;
   onRetry: () => void;
+  onRetrySantiscat?: () => void;
   onMainMenu: () => void;
 }
 
@@ -15,12 +17,15 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({
   stage,
   deathReason,
   bossBlackFlashesCount = 0,
+  isSantiscatBattle = false,
   onRetry,
+  onRetrySantiscat,
   onMainMenu,
 }) => {
   const isGammaExtinction = deathReason === 'gamma_ray';
   const isSantiscatOneShot = deathReason === 'santiscat_oneshot';
   const isBlackHoleDeath = deathReason === 'black_hole';
+  const isRealityTear = deathReason === 'reality_tear';
 
   // Ensure gamma sound stops immediately when game over is mounted
   useEffect(() => {
@@ -61,6 +66,8 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({
             ? '¡DESINTEGRACIÓN ONE-SHOT!'
             : isBlackHoleDeath
             ? '¡ABSORBIDO POR EL AGUJERO NEGRO!'
+            : isRealityTear
+            ? '¡DESGARRO DE LA REALIDAD!'
             : 'FIN DE LA PARTIDA'}
         </h2>
 
@@ -70,9 +77,11 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({
             : isSantiscatOneShot
             ? 'La bola de fuego singular de Santiscat es 1-Shot letal al contacto directo.'
             : isBlackHoleDeath
-            ? 'El horizonte de sucesos del agujero negro distorsionó y devoró la materia de Catvalen.'
+            ? 'Entraste al Agujero Negro de Santiscat: ¡su horizonte de sucesos es muerte automática!'
+            : isRealityTear
+            ? 'Los cortes de realidad dañaron el espacio-tiempo alrededor de Catvalen.'
             : stage === 'santiscat_boss'
-            ? 'Santiscat manipuló el tejido de la realidad hasta quebrar tu defensa.'
+            ? 'Santiscat (15,000 HP) dominó la batalla cósmica. ¡Aprende sus fases para triunfar!'
             : stage === 'boss'
             ? 'Nanovalen fue implacable con sus ataques mejorados. ¡Aprende sus patrones de combate!'
             : 'Los obstáculos derribaron a Catvalen. ¡Inténtalo de nuevo!'}
@@ -97,15 +106,23 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({
               </span>
             ) : isBlackHoleDeath ? (
               <span>
-                El <strong>Agujero Negro</strong> absorbe meteoritos y escombros que rotan en su disco de acreción. ¡Huye a toda velocidad para no quedar atrapado en su campo gravitatorio!
+                ¡El <strong>Agujero Negro de Santiscat</strong> es <strong>muerte automática</strong> al entrar en él! Huye velozmente de su atracción gravitatoria y evita los escombros que orbitan a su alrededor.
+              </span>
+            ) : isRealityTear ? (
+              <span>
+                ¡Cuidado con los ataques dimensionales! Durante la <strong>Expansión de Dominio: Templo del Mal</strong> de Sukunacat, <strong>MANTÉN PRESIONADO [K]</strong> o el botón de escudo para que los miles de cortes no te maten. ¡Y esquiva a toda costa el <strong>Vacío Púrpura</strong> de Gojocat que es One-Shot!
               </span>
             ) : isGammaExtinction ? (
               <span>
                 ¡El estallido gamma es <strong>triple de potente</strong> y <strong>no se puede cancelar</strong>! Cuando Nanovalen lo active, maniobra de inmediato hacia el <strong>arco de seguridad verde</strong> para sobrevivir.
               </span>
+            ) : stage === 'santiscat_boss' ? (
+              <span>
+                Cuando Sukunacat use su <strong>Expansión de Dominio (Templo del Mal)</strong>, <strong>MANTÉN [K]</strong> o el escudo presionado hasta que termine. Esquiva la atracción de <strong>Azul</strong> y la repulsión de <strong>Rojo</strong> de Gojocat, y nunca toques el <strong>Vacío Púrpura</strong> ni el <strong>Agujero Negro</strong> (son letales al contacto).
+              </span>
             ) : (
               <span>
-                Todos tus ataques tienen <strong>cooldown</strong>; administra bien tus bolas de fuego y rayos. Esquiva los ataques o usa tu <strong>Escudo</strong> con anticipación.
+                Recuerda que Catvalen ahora puede <strong>voltearse hacia la izquierda</strong> (presionando [A] o flecha izquierda) para disparar ataques y golpear en ambas direcciones.
               </span>
             )}
           </div>
@@ -113,15 +130,29 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({
 
         {/* Action Buttons */}
         <div className="flex flex-col gap-2.5">
+          {/* Prominent Santiscat Rematch Button when in Level 4 Boss */}
+          {onRetrySantiscat && (isSantiscatBattle || isBlackHoleDeath || isSantiscatOneShot || isRealityTear) && (
+            <button
+              onClick={() => {
+                soundManager.stopGammaSound();
+                onRetrySantiscat();
+              }}
+              className="w-full flex items-center justify-center gap-2.5 py-3.5 px-6 rounded-2xl bg-gradient-to-r from-purple-600 via-fuchsia-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-black font-display text-sm tracking-wider shadow-xl shadow-purple-600/35 transition-transform active:scale-95 cursor-pointer border border-purple-400/40"
+            >
+              <RotateCcw className="w-5 h-5 text-purple-200" />
+              <span>Reintentar Batalla contra Santiscat</span>
+            </button>
+          )}
+
           <button
             onClick={() => {
               soundManager.stopGammaSound();
               onRetry();
             }}
-            className="w-full flex items-center justify-center gap-2 py-3.5 px-6 rounded-2xl bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 text-white font-extrabold font-game shadow-lg shadow-red-600/25 transition-transform active:scale-95 cursor-pointer"
+            className="w-full flex items-center justify-center gap-2 py-3 px-6 rounded-2xl bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 text-white font-extrabold font-game shadow-lg shadow-red-600/25 transition-transform active:scale-95 cursor-pointer"
           >
-            <RotateCcw className="w-5 h-5" />
-            <span>Reintentar Misión</span>
+            <RotateCcw className="w-4 h-4" />
+            <span>Reintentar desde el Inicio</span>
           </button>
 
           <button
@@ -129,7 +160,7 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({
               soundManager.stopGammaSound();
               onMainMenu();
             }}
-            className="w-full flex items-center justify-center gap-2 py-3 px-6 rounded-2xl bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 hover:border-neutral-600 text-neutral-200 hover:text-white font-bold font-game transition-all active:scale-95 cursor-pointer"
+            className="w-full flex items-center justify-center gap-2 py-2.5 px-6 rounded-2xl bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 hover:border-neutral-600 text-neutral-200 hover:text-white font-bold font-game transition-all active:scale-95 cursor-pointer text-xs"
           >
             <Home className="w-4 h-4 text-neutral-400" />
             <span>Volver al Menú Principal</span>

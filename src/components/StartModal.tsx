@@ -28,6 +28,9 @@ import {
   Wand2,
   Wrench,
   Crown,
+  Users,
+  Wifi,
+  Target,
 } from 'lucide-react';
 
 interface StartModalProps {
@@ -39,6 +42,9 @@ interface StartModalProps {
   onSetWins?: (wins: number) => void;
   onOpenAudioModal?: () => void;
   onOpenAdminModal?: () => void;
+  onOpenRoomModal?: () => void;
+  onOpenAchievements?: () => void;
+  onOpenMissions?: () => void;
 }
 
 export const StartModal: React.FC<StartModalProps> = ({
@@ -50,6 +56,9 @@ export const StartModal: React.FC<StartModalProps> = ({
   onSetWins,
   onOpenAudioModal,
   onOpenAdminModal,
+  onOpenRoomModal,
+  onOpenAchievements,
+  onOpenMissions,
 }) => {
   const [activeTab, setActiveTab] = useState<'skins' | 'controls'>('skins');
   const [previewSkinId, setPreviewSkinId] = useState<CharacterSkinId>(selectedSkin);
@@ -88,6 +97,42 @@ export const StartModal: React.FC<StartModalProps> = ({
                 {nanovalenWins} {nanovalenWins === 1 ? 'Victoria' : 'Victorias'}
               </span>
             </div>
+
+            {/* Multiplayer Rooms Lobby Button */}
+            {onOpenRoomModal && (
+              <button
+                onClick={onOpenRoomModal}
+                className="flex items-center gap-1.5 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-black text-xs px-3 py-1.5 rounded-xl shadow-lg shadow-cyan-500/20 active:scale-95 transition-all cursor-pointer"
+                title="Abrir Salas Multijugador (Mismo Wi-Fi)"
+              >
+                <Users className="w-3.5 h-3.5" />
+                <span>SALAS WI-FI</span>
+              </button>
+            )}
+
+            {/* Missions Button */}
+            {onOpenMissions && (
+              <button
+                onClick={onOpenMissions}
+                className="flex items-center gap-1.5 bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/50 text-cyan-300 font-black text-xs px-3 py-1.5 rounded-xl shadow-lg active:scale-95 transition-all cursor-pointer"
+                title="Ver Misiones Secundarias y Bonus de Daño"
+              >
+                <Target className="w-3.5 h-3.5 text-cyan-400" />
+                <span>MISIONES</span>
+              </button>
+            )}
+
+            {/* Achievements Button */}
+            {onOpenAchievements && (
+              <button
+                onClick={onOpenAchievements}
+                className="flex items-center gap-1.5 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/50 text-amber-300 font-black text-xs px-3 py-1.5 rounded-xl shadow-lg active:scale-95 transition-all cursor-pointer"
+                title="Ver Logros"
+              >
+                <Trophy className="w-3.5 h-3.5 text-amber-400" />
+                <span>LOGROS</span>
+              </button>
+            )}
 
             {/* Admin Panel Button */}
             {onOpenAdminModal && (
@@ -466,14 +511,26 @@ export const StartModal: React.FC<StartModalProps> = ({
           </div>
         )}
 
-        {/* Big Start Button with Selected Character Name */}
-        <button
-          onClick={onStart}
-          className="w-full flex items-center justify-center gap-3 py-4 px-6 rounded-2xl bg-gradient-to-r from-amber-500 via-orange-500 to-red-500 hover:from-amber-400 hover:to-red-400 text-white text-base font-black font-display tracking-wider shadow-xl shadow-orange-500/25 transition-transform active:scale-95 cursor-pointer"
-        >
-          <Play className="w-5 h-5 fill-white" />
-          <span>¡JUGAR CON {CHARACTER_SKINS[selectedSkin]?.name.toUpperCase() || 'CATVALEN'}!</span>
-        </button>
+        {/* Action Buttons: Solo Play & Multiplayer Rooms */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <button
+            onClick={onStart}
+            className="flex items-center justify-center gap-2.5 py-3.5 px-4 rounded-2xl bg-gradient-to-r from-amber-500 via-orange-500 to-red-500 hover:from-amber-400 hover:to-red-400 text-white text-sm sm:text-base font-black font-display tracking-wider shadow-xl shadow-orange-500/25 transition-transform active:scale-95 cursor-pointer"
+          >
+            <Play className="w-5 h-5 fill-white" />
+            <span>¡JUGAR EN SOLITARIO!</span>
+          </button>
+
+          {onOpenRoomModal && (
+            <button
+              onClick={onOpenRoomModal}
+              className="flex items-center justify-center gap-2.5 py-3.5 px-4 rounded-2xl bg-gradient-to-r from-cyan-600 via-sky-500 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white text-sm sm:text-base font-black font-display tracking-wider shadow-xl shadow-cyan-500/25 transition-transform active:scale-95 cursor-pointer"
+            >
+              <Users className="w-5 h-5" />
+              <span>🌐 MULTIJUGADOR WI-FI</span>
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );

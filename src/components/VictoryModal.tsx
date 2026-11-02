@@ -151,41 +151,59 @@ export const VictoryModal: React.FC<VictoryModalProps> = ({
 
         {/* Action Buttons */}
         <div className="flex flex-col gap-2.5 justify-center">
-          {/* Primary Siguiente Nivel Button */}
-          <button
-            onClick={onNextLevel ? onNextLevel : () => {}}
-            className="w-full flex items-center justify-center gap-2.5 py-3.5 px-6 rounded-2xl bg-gradient-to-r from-cyan-500 via-sky-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-black font-display text-sm tracking-wider shadow-xl shadow-cyan-500/25 transition-transform active:scale-95 cursor-pointer"
-          >
-            <Sparkles className="w-4 h-4 text-cyan-200 animate-spin" />
-            <span>Siguiente Nivel ➔</span>
-          </button>
+          {isSantiscatDefeated ? (
+            /* Al ganarle totalmente a Santiscat: SOLO la opción de volver al menú principal */
+            <div className="space-y-3 pt-2">
+              <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-2xl text-xs text-amber-200 font-bold">
+                ✨ ¡HAS COMPLETADO LA BATALLA DEFINITIVA DERROTANDO A SANTISCAT! ✨
+              </div>
+              <button
+                onClick={onMainMenu}
+                className="w-full flex items-center justify-center gap-3 py-4 px-6 rounded-2xl bg-gradient-to-r from-emerald-500 via-teal-500 to-cyan-500 hover:from-emerald-400 hover:to-cyan-400 text-white font-black font-display text-base tracking-wider shadow-xl shadow-emerald-500/30 transition-transform active:scale-95 cursor-pointer"
+              >
+                <Home className="w-5 h-5 text-white" />
+                <span>Volver al Menú Principal</span>
+              </button>
+            </div>
+          ) : (
+            <>
+              {/* Primary Siguiente Nivel Button */}
+              <button
+                onClick={onNextLevel ? onNextLevel : () => {}}
+                className="w-full flex items-center justify-center gap-2.5 py-3.5 px-6 rounded-2xl bg-gradient-to-r from-cyan-500 via-sky-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-black font-display text-sm tracking-wider shadow-xl shadow-cyan-500/25 transition-transform active:scale-95 cursor-pointer"
+              >
+                <Sparkles className="w-4 h-4 text-cyan-200 animate-spin" />
+                <span>Siguiente Nivel ➔</span>
+              </button>
 
-          <div className="flex flex-col sm:flex-row gap-3">
-            <button
-              onClick={onPlayAgain}
-              className="flex-1 flex items-center justify-center gap-2 py-3 px-5 rounded-2xl bg-gradient-to-r from-emerald-500 to-green-600 hover:from-emerald-400 hover:to-green-500 text-white font-extrabold font-game shadow-lg shadow-emerald-500/25 transition-transform active:scale-95 cursor-pointer"
-            >
-              <RotateCcw className="w-4 h-4" />
-              <span>Jugar de Nuevo</span>
-            </button>
+              <div className="flex flex-col sm:flex-row gap-3">
+                <button
+                  onClick={onPlayAgain}
+                  className="flex-1 flex items-center justify-center gap-2 py-3 px-5 rounded-2xl bg-gradient-to-r from-emerald-500 to-green-600 hover:from-emerald-400 hover:to-green-500 text-white font-extrabold font-game shadow-lg shadow-emerald-500/25 transition-transform active:scale-95 cursor-pointer"
+                >
+                  <RotateCcw className="w-4 h-4" />
+                  <span>Jugar de Nuevo</span>
+                </button>
 
-            <button
-              onClick={onRematchBoss}
-              className="flex-1 flex items-center justify-center gap-2 py-3 px-5 rounded-2xl bg-neutral-800 hover:bg-neutral-700 border border-neutral-600 text-neutral-200 font-bold font-game transition-transform active:scale-95 cursor-pointer"
-            >
-              <Zap className="w-4 h-4 text-red-400" />
-              <span>Revancha Nanovalen</span>
-            </button>
-          </div>
+                <button
+                  onClick={onRematchBoss}
+                  className="flex-1 flex items-center justify-center gap-2 py-3 px-5 rounded-2xl bg-neutral-800 hover:bg-neutral-700 border border-neutral-600 text-neutral-200 font-bold font-game transition-transform active:scale-95 cursor-pointer"
+                >
+                  <Zap className="w-4 h-4 text-red-400" />
+                  <span>Revancha Nanovalen</span>
+                </button>
+              </div>
 
-          {onMainMenu && (
-            <button
-              onClick={onMainMenu}
-              className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-2xl bg-neutral-850 hover:bg-neutral-800 border border-neutral-700 text-neutral-300 hover:text-white text-xs font-bold transition-all active:scale-95 cursor-pointer"
-            >
-              <Home className="w-4 h-4 text-neutral-400" />
-              <span>Volver al Menú Principal</span>
-            </button>
+              {onMainMenu && (
+                <button
+                  onClick={onMainMenu}
+                  className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-2xl bg-neutral-850 hover:bg-neutral-800 border border-neutral-700 text-neutral-300 hover:text-white text-xs font-bold transition-all active:scale-95 cursor-pointer"
+                >
+                  <Home className="w-4 h-4 text-neutral-400" />
+                  <span>Volver al Menú Principal</span>
+                </button>
+              )}
+            </>
           )}
         </div>
       </div>

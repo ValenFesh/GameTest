@@ -16,12 +16,35 @@ export interface BlackHoleShaderUniforms {
   mass: number;    // bending strength (e.g. 1.2 to 2.5)
 }
 
+export interface HollowPurpleShaderUniforms {
+  active: boolean;
+  screenX: number; // in pixels
+  screenY: number; // in pixels
+  radius: number;  // in pixels
+}
+
 export interface RealitySlashShaderUniforms {
   x1: number;
   y1: number;
   x2: number;
   y2: number;
   intensity: number;
+}
+
+export interface WormholeShaderUniforms {
+  active: boolean;
+  speed: number;
+  centerScreenX: number;
+  centerScreenY: number;
+  hueShift: number;
+}
+
+export interface ImplosionShaderUniforms {
+  active: boolean;
+  screenX: number;
+  screenY: number;
+  progress: number; // 0.0 to 1.0
+  radius: number;
 }
 
 export class DistortionShaderPipeline {
@@ -38,9 +61,20 @@ export class DistortionShaderPipeline {
   private uBlackHolePosLoc: WebGLUniformLocation | null = null;
   private uBlackHoleRadiusLoc: WebGLUniformLocation | null = null;
   private uBlackHoleMassLoc: WebGLUniformLocation | null = null;
+  private uPurpleActiveLoc: WebGLUniformLocation | null = null;
+  private uPurplePosLoc: WebGLUniformLocation | null = null;
+  private uPurpleRadiusLoc: WebGLUniformLocation | null = null;
   private uGlitchStrengthLoc: WebGLUniformLocation | null = null;
   private uSlashCountLoc: WebGLUniformLocation | null = null;
   private uSlashesLoc: WebGLUniformLocation | null = null;
+  private uWormholeActiveLoc: WebGLUniformLocation | null = null;
+  private uWormholeSpeedLoc: WebGLUniformLocation | null = null;
+  private uWormholeCenterLoc: WebGLUniformLocation | null = null;
+  private uWormholeHueLoc: WebGLUniformLocation | null = null;
+  private uImplosionActiveLoc: WebGLUniformLocation | null = null;
+  private uImplosionPosLoc: WebGLUniformLocation | null = null;
+  private uImplosionProgressLoc: WebGLUniformLocation | null = null;
+  private uImplosionRadiusLoc: WebGLUniformLocation | null = null;
 
   private isSupported: boolean = false;
 
@@ -110,14 +144,68 @@ export class DistortionShaderPipeline {
       uniform float u_blackHoleRadius; // normalized
       uniform float u_blackHoleMass;
 
+      // Hollow Purple (Kyoshiki Murasaki) Spacetime Distortion
+      uniform float u_purpleActive;
+      uniform vec2 u_purplePos; // normalized 0..1
+      uniform float u_purpleRadius; // normalized
+
       // Reality Glitch & Dimension Slashes
       uniform float u_glitchStrength;
       uniform int u_slashCount;
       uniform vec4 u_slashes[6]; // (x1, y1, x2, y2) normalized
 
+      // Psychedelic Fractal Wormhole Tunnel
+      uniform float u_wormholeActive;
+      uniform float u_wormholeSpeed;
+      uniform vec2 u_wormholeCenter;
+      uniform float u_wormholeHue;
+
+      // Cosmic Defeat Implosion (Spacetime Singularity Contraction)
+      uniform float u_implosionActive;
+      uniform vec2 u_implosionPos;
+      uniform float u_implosionProgress;
+      uniform float u_implosionRadius;
+
       void main() {
         vec2 uv = v_uv;
         vec2 aspect = vec2(u_resolution.x / u_resolution.y, 1.0);
+
+        // 0. Psychedelic Fractal Wormhole Hyperspace Tunnel
+        vec3 wormholeGlow = vec3(0.0);
+        if (u_wormholeActive > 0.01) {
+          vec2 wCenter = u_wormholeCenter;
+          vec2 wP = (uv - wCenter) * aspect;
+          float wDist = length(wP);
+          float wAngle = atan(wP.y, wP.x);
+
+          // Relativistic hyperbolic tunnel mapping
+          float wZ = (0.28 / (wDist + 0.002)) + u_time * u_wormholeSpeed * 2.2;
+          
+          // Kaleidoscope fractal spiral
+          float fractalPattern = sin(wZ * 7.0 + wAngle * 5.0) * cos(wZ * 3.5 - wAngle * 3.0);
+          fractalPattern += sin(wZ * 14.0 - wAngle * 7.0) * 0.35;
+          
+          // Vibrant shifting rainbow spectrum
+          float hue = fract(wZ * 0.12 + wAngle / 6.28318 + u_wormholeHue + u_time * 0.3);
+          vec3 rainbow = clamp(abs(mod(hue * 6.0 + vec3(0.0, 4.0, 2.0), 6.0) - 3.0) - 1.0, 0.0, 1.0);
+          
+          // Neon cosmic contrast
+          rainbow = mix(rainbow, vec3(1.0), 0.28 + 0.28 * fractalPattern);
+          float depthFade = smoothstep(0.008, 0.65, wDist);
+          wormholeGlow = rainbow * depthFade * (0.65 + 0.35 * sin(wZ * 8.0)) * u_wormholeActive;
+
+          // Clear out wormhole glare around black hole so its singularity & accretion disk are crystal clear
+          if (u_blackHoleActive > 0.5) {
+            vec2 bhDistDiff = (uv - u_blackHolePos) * aspect;
+            float bhDist = length(bhDistDiff);
+            float bhCarve = smoothstep(u_blackHoleRadius * 0.7, u_blackHoleRadius * 2.8, bhDist);
+            wormholeGlow *= bhCarve;
+          }
+          
+          // Swirl texture coordinates along the tunnel
+          float tunnelSwirl = sin(wZ * 4.0) * 0.015 * u_wormholeActive;
+          uv += vec2(cos(wAngle), sin(wAngle)) * tunnelSwirl;
+        }
 
         // 1. Spacetime Distortion by Dimension Slashes
         if (u_slashCount > 0) {
@@ -179,6 +267,53 @@ export class DistortionShaderPipeline {
           }
         }
 
+        // 2.5 Hollow Purple Spacetime Vortex (Imaginary Mass Gravitational Distortion)
+        vec3 purpleHalo = vec3(0.0);
+        if (u_purpleActive > 0.5) {
+          vec2 pDiff = (uv - u_purplePos) * aspect;
+          float pDist = length(pDiff);
+          float pRad = u_purpleRadius;
+          float pField = pRad * 3.6;
+
+          if (pDist < pRad * 0.65) {
+            // Singularity of Hollow Purple: intense violet matter erasure
+            float coreEdge = smoothstep(0.0, pRad * 0.65, pDist);
+            gl_FragColor = vec4(vec3(0.18, 0.02, 0.32) * coreEdge, 1.0);
+            return;
+          } else if (pDist < pField) {
+            // Spacetime vortex warping
+            float pWarp = (pRad * pRad / (pDist * pDist + 0.0001)) * 0.18;
+            vec2 pDir = normalize(pDiff);
+            float pAngle = atan(pDiff.y, pDiff.x) + pWarp * 3.2 - u_time * 4.5;
+            vec2 pSwirl = vec2(cos(pAngle), sin(pAngle));
+            uv -= (mix(pDir, pSwirl, 0.55) / aspect) * pWarp;
+
+            float pIntensity = smoothstep(pRad * 0.65, pRad * 1.15, pDist) * (1.0 - smoothstep(pRad * 1.15, pField, pDist));
+            purpleHalo = vec3(0.85, 0.12, 1.0) * pIntensity * 2.6 + vec3(0.25, 0.45, 1.0) * pIntensity * 1.3;
+          }
+        }
+
+        // 2.8 Cosmic Implosion Singularity Contraction
+        vec3 implosionGlow = vec3(0.0);
+        if (u_implosionActive > 0.01) {
+          vec2 iDiff = (uv - u_implosionPos) * aspect;
+          float iDist = length(iDiff);
+          float iRad = u_implosionRadius;
+          if (iDist < iRad) {
+            float normD = iDist / iRad;
+            // Spacetime suction inwards: coordinates pulled towards singularity as progress increases
+            float pull = pow(u_implosionProgress, 1.9) * (1.0 - normD) * 0.48;
+            float swirlAng = atan(iDiff.y, iDiff.x) + u_implosionProgress * 12.0 + (1.0 - normD) * 6.28;
+            vec2 swirlVec = vec2(cos(swirlAng), sin(swirlAng));
+            uv -= (mix(normalize(iDiff), swirlVec, 0.45) / aspect) * pull;
+
+            // Intense white/cyan/violet cosmic accretion ripples
+            float ripple = sin((1.0 - normD) * 35.0 - u_implosionProgress * 28.0);
+            float coreBright = pow(1.0 - normD, 2.0) * u_implosionProgress * 3.2;
+            implosionGlow = vec3(0.75, 0.88, 1.0) * coreBright + vec3(0.9, 0.35, 1.0) * max(0.0, ripple) * u_implosionProgress * 0.9;
+          }
+        }
+
         // 3. Reality Glitch & Chromatic Aberration
         if (u_glitchStrength > 0.02) {
           // Horizontal scanline slice distortion
@@ -189,11 +324,15 @@ export class DistortionShaderPipeline {
           vec4 colG = texture2D(u_texture, clamp(uv, 0.0, 1.0));
           vec4 colB = texture2D(u_texture, clamp(vec2(uv.x - chromaticOffset, uv.y), 0.0, 1.0));
 
-          vec3 finalColor = vec3(colR.r, colG.g, colB.b) + photonHalo;
+          vec3 finalColor = vec3(colR.r, colG.g, colB.b) + photonHalo + purpleHalo + wormholeGlow + implosionGlow;
           gl_FragColor = vec4(finalColor, 1.0);
         } else {
           vec4 baseColor = texture2D(u_texture, clamp(uv, 0.0, 1.0));
-          gl_FragColor = vec4(baseColor.rgb + photonHalo, baseColor.a);
+          vec3 finalColor = baseColor.rgb + photonHalo + purpleHalo + implosionGlow;
+          if (u_wormholeActive > 0.01) {
+            finalColor = mix(finalColor, wormholeGlow + finalColor * 0.85, u_wormholeActive * 0.75);
+          }
+          gl_FragColor = vec4(finalColor, baseColor.a);
         }
       }
     `;
@@ -221,9 +360,20 @@ export class DistortionShaderPipeline {
     this.uBlackHolePosLoc = gl.getUniformLocation(this.program, 'u_blackHolePos');
     this.uBlackHoleRadiusLoc = gl.getUniformLocation(this.program, 'u_blackHoleRadius');
     this.uBlackHoleMassLoc = gl.getUniformLocation(this.program, 'u_blackHoleMass');
+    this.uPurpleActiveLoc = gl.getUniformLocation(this.program, 'u_purpleActive');
+    this.uPurplePosLoc = gl.getUniformLocation(this.program, 'u_purplePos');
+    this.uPurpleRadiusLoc = gl.getUniformLocation(this.program, 'u_purpleRadius');
     this.uGlitchStrengthLoc = gl.getUniformLocation(this.program, 'u_glitchStrength');
     this.uSlashCountLoc = gl.getUniformLocation(this.program, 'u_slashCount');
     this.uSlashesLoc = gl.getUniformLocation(this.program, 'u_slashes');
+    this.uWormholeActiveLoc = gl.getUniformLocation(this.program, 'u_wormholeActive');
+    this.uWormholeSpeedLoc = gl.getUniformLocation(this.program, 'u_wormholeSpeed');
+    this.uWormholeCenterLoc = gl.getUniformLocation(this.program, 'u_wormholeCenter');
+    this.uWormholeHueLoc = gl.getUniformLocation(this.program, 'u_wormholeHue');
+    this.uImplosionActiveLoc = gl.getUniformLocation(this.program, 'u_implosionActive');
+    this.uImplosionPosLoc = gl.getUniformLocation(this.program, 'u_implosionPos');
+    this.uImplosionProgressLoc = gl.getUniformLocation(this.program, 'u_implosionProgress');
+    this.uImplosionRadiusLoc = gl.getUniformLocation(this.program, 'u_implosionRadius');
   }
 
   private compileShader(type: number, source: string): WebGLShader | null {
@@ -272,7 +422,10 @@ export class DistortionShaderPipeline {
     time: number,
     blackHole?: BlackHoleShaderUniforms,
     glitchStrength: number = 0,
-    slashes: RealitySlashShaderUniforms[] = []
+    slashes: RealitySlashShaderUniforms[] = [],
+    hollowPurple?: HollowPurpleShaderUniforms,
+    wormhole?: WormholeShaderUniforms,
+    implosion?: ImplosionShaderUniforms
   ) {
     if (!this.gl || !this.program || !this.texture || !this.quadBuffer) return;
     const gl = this.gl;
@@ -299,6 +452,42 @@ export class DistortionShaderPipeline {
       gl.uniform1f(this.uTimeLoc, time);
     }
 
+    // Wormhole Hyperspace Tunnel uniforms
+    if (wormhole && wormhole.active) {
+      if (this.uWormholeActiveLoc) gl.uniform1f(this.uWormholeActiveLoc, 1.0);
+      if (this.uWormholeSpeedLoc) gl.uniform1f(this.uWormholeSpeedLoc, wormhole.speed || 1.0);
+      if (this.uWormholeCenterLoc) {
+        gl.uniform2f(
+          this.uWormholeCenterLoc,
+          wormhole.centerScreenX / this.glCanvas.width,
+          wormhole.centerScreenY / this.glCanvas.height
+        );
+      }
+      if (this.uWormholeHueLoc) gl.uniform1f(this.uWormholeHueLoc, wormhole.hueShift || 0.0);
+    } else {
+      if (this.uWormholeActiveLoc) gl.uniform1f(this.uWormholeActiveLoc, 0.0);
+    }
+
+    // Cosmic Implosion Singularity uniforms
+    if (implosion && implosion.active) {
+      if (this.uImplosionActiveLoc) gl.uniform1f(this.uImplosionActiveLoc, 1.0);
+      if (this.uImplosionPosLoc) {
+        gl.uniform2f(
+          this.uImplosionPosLoc,
+          implosion.screenX / this.glCanvas.width,
+          implosion.screenY / this.glCanvas.height
+        );
+      }
+      if (this.uImplosionProgressLoc) {
+        gl.uniform1f(this.uImplosionProgressLoc, implosion.progress);
+      }
+      if (this.uImplosionRadiusLoc) {
+        gl.uniform1f(this.uImplosionRadiusLoc, implosion.radius / this.glCanvas.height);
+      }
+    } else {
+      if (this.uImplosionActiveLoc) gl.uniform1f(this.uImplosionActiveLoc, 0.0);
+    }
+
     // Black Hole Gravitational Lensing uniforms
     if (blackHole && blackHole.active) {
       if (this.uBlackHoleActiveLoc) gl.uniform1f(this.uBlackHoleActiveLoc, 1.0);
@@ -317,6 +506,23 @@ export class DistortionShaderPipeline {
       }
     } else {
       if (this.uBlackHoleActiveLoc) gl.uniform1f(this.uBlackHoleActiveLoc, 0.0);
+    }
+
+    // Hollow Purple Spacetime Vortex uniforms
+    if (hollowPurple && hollowPurple.active) {
+      if (this.uPurpleActiveLoc) gl.uniform1f(this.uPurpleActiveLoc, 1.0);
+      if (this.uPurplePosLoc) {
+        gl.uniform2f(
+          this.uPurplePosLoc,
+          hollowPurple.screenX / this.glCanvas.width,
+          hollowPurple.screenY / this.glCanvas.height
+        );
+      }
+      if (this.uPurpleRadiusLoc) {
+        gl.uniform1f(this.uPurpleRadiusLoc, hollowPurple.radius / this.glCanvas.height);
+      }
+    } else {
+      if (this.uPurpleActiveLoc) gl.uniform1f(this.uPurpleActiveLoc, 0.0);
     }
 
     // Glitch strength

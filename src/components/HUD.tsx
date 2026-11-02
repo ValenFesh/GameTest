@@ -23,7 +23,12 @@ import {
   Sword,
   Sparkle,
   Crown,
+  RotateCcw,
+  Lock,
+  Trophy,
+  Target,
 } from 'lucide-react';
+import { canAccessAdminPanel } from '../game/achievements';
 
 interface HUDProps {
   engine: GameEngine;
@@ -37,8 +42,14 @@ interface HUDProps {
   onSpecial2?: () => void;
   onOpenAudioModal?: () => void;
   onOpenAdminModal?: () => void;
+  onOpenScoreboard?: () => void;
+  onOpenAchievements?: () => void;
+  onOpenMissions?: () => void;
+  onRematchSantiscat?: () => void;
   isMuted: boolean;
   onToggleMute: () => void;
+  showTouchControls?: boolean;
+  onToggleTouchControls?: () => void;
 }
 
 export const HUD: React.FC<HUDProps> = ({
@@ -53,13 +64,21 @@ export const HUD: React.FC<HUDProps> = ({
   onSpecial2,
   onOpenAudioModal,
   onOpenAdminModal,
+  onOpenScoreboard,
+  onOpenAchievements,
+  onOpenMissions,
+  onRematchSantiscat,
   isMuted,
   onToggleMute,
+  showTouchControls,
+  onToggleTouchControls,
 }) => {
   const player = engine.player;
   const boss = engine.boss;
   const stage = engine.stage;
   const skinConfig = CHARACTER_SKINS[player.skin] || CHARACTER_SKINS.catvalen;
+  const isHost = engine.isHostPlayer();
+  const canAdmin = canAccessAdminPanel(isHost);
 
   if (stage === 'cinematic_earth_destruction') {
     return (
@@ -127,102 +146,165 @@ export const HUD: React.FC<HUDProps> = ({
             ⚡ Escudo de Nanovalen Desactivado ({boss.shieldDisabledTimer.toFixed(1)}s)
           </div>
         )}
+        {engine.santiscat?.shrine?.active && (
+          <div className="bg-red-950/95 border-2 border-red-500 text-red-100 px-6 py-2.5 rounded-2xl shadow-[0_0_35px_#dc2626] flex flex-col items-center gap-1.5 font-black animate-pulse pointer-events-auto">
+            <div className="flex items-center gap-2 text-sm text-yellow-300 tracking-wide font-display">
+              <ShieldAlert className="w-5 h-5 text-red-400 animate-spin" />
+              <span>⛩️ ¡EXPANSIÓN DE DOMINIO: TEMPLO DEL MAL (FUKUMA MIZUSHI)! ⛩️</span>
+            </div>
+            <div className="text-xs text-white font-mono bg-red-900/80 px-3.5 py-1 rounded-lg border border-red-400/80 shadow">
+              🛡️ ¡MANTÉN PRESIONADO <strong className="text-yellow-300 font-bold">[K]</strong> O EL BOTÓN DE ESCUDO PARA NO MORIR! ({(Math.max(0, engine.santiscat.shrine.maxDuration - engine.santiscat.shrine.timer)).toFixed(1)}s)
+            </div>
+          </div>
+        )}
+        {engine.santiscat?.gojoTechniques?.blue.active && (
+          <div className="bg-sky-950/95 border-2 border-cyan-400 text-sky-200 px-5 py-2 rounded-2xl shadow-[0_0_30px_#0284c7] flex items-center gap-2 text-xs font-black animate-pulse">
+            <span className="text-cyan-300 font-extrabold text-sm">🌀</span>
+            <span>¡AZUL DE GOJOCAT! (SUCCIÓN GRAVITATORIA · CORRE EN DIRECCIÓN CONTRARIA O USA [K] PARA ESCAPAR)</span>
+          </div>
+        )}
+        {engine.santiscat?.gojoTechniques?.purple.active && (
+          <div className="bg-purple-950/95 border-2 border-fuchsia-400 text-purple-200 px-5 py-2 rounded-2xl shadow-[0_0_30px_#a855f7] flex items-center gap-2 text-xs font-black animate-bounce">
+            <Sparkles className="w-5 h-5 text-fuchsia-300 animate-spin" />
+            <span>🟣 ¡VACÍO PÚRPURA DE GOJOCAT! (PROYECTIL GIGANTE ONE-SHOT · ESQUÍVALO)</span>
+          </div>
+        )}
       </div>
 
       {/* Top Header Bar */}
       <div className="flex items-start justify-between gap-3 w-full">
-        {/* Player Profile with Active Skin Avatar */}
-        <div className="flex items-center gap-3 bg-neutral-900/85 backdrop-blur-md border border-neutral-700/80 rounded-2xl p-2.5 shadow-xl max-w-sm">
-          {/* Avatar box */}
-          <div
-            className="relative w-12 h-12 border-2 border-neutral-900 rounded-lg flex items-center justify-center overflow-hidden shrink-0 shadow-inner"
-            style={{ backgroundColor: skinConfig.primaryColor }}
-          >
-            {/* Visual Mini Avatar representation */}
+        {/* Player Profile & Multiplayer Squad */}
+        <div className="flex flex-col gap-1.5 max-w-xs sm:max-w-sm">
+          <div className="flex items-center gap-3 bg-neutral-900/85 backdrop-blur-md border border-neutral-700/80 rounded-2xl p-2.5 shadow-xl">
+            {/* Avatar box */}
             <div
-              className="w-8 h-8 border border-neutral-950 relative rounded-sm flex flex-col items-center justify-center"
+              className="relative w-12 h-12 border-2 border-neutral-900 rounded-lg flex items-center justify-center overflow-hidden shrink-0 shadow-inner"
               style={{ backgroundColor: skinConfig.primaryColor }}
             >
-              {/* Ears */}
-              {player.skin.startsWith('perro') ? (
-                <>
-                  <div
-                    className="absolute -top-1 -left-2 w-3 h-5 rounded-b-md border border-neutral-950 rotate-12"
-                    style={{ backgroundColor: skinConfig.secondaryColor }}
-                  />
-                  <div
-                    className="absolute -top-1 -right-2 w-3 h-5 rounded-b-md border border-neutral-950 -rotate-12"
-                    style={{ backgroundColor: skinConfig.secondaryColor }}
-                  />
-                </>
-              ) : (
-                <>
-                  <div
-                    className="absolute -top-1.5 left-0 w-2.5 h-2.5 border-t border-l border-neutral-950 rotate-12"
-                    style={{ backgroundColor: skinConfig.secondaryColor }}
-                  />
-                  <div
-                    className="absolute -top-1.5 right-0 w-2.5 h-2.5 border-t border-r border-neutral-950 -rotate-12"
-                    style={{ backgroundColor: skinConfig.secondaryColor }}
-                  />
-                </>
-              )}
-              {/* Eyes */}
-              <div className="flex gap-2">
-                <div className="w-1.5 h-2 bg-neutral-950 rounded-full" />
-                <div className="w-1.5 h-2 bg-neutral-950 rounded-full" />
-              </div>
-              {/* Snout or smile */}
-              <div className="text-[7px] font-bold text-neutral-950 leading-none mt-0.5">
-                {player.skin.startsWith('perro') ? '▼' : ':3'}
-              </div>
-            </div>
-            {player.shieldActive && (
+              {/* Visual Mini Avatar representation */}
               <div
-                className="absolute inset-0 border-2 rounded-lg animate-pulse"
-                style={{
-                  borderColor: skinConfig.shieldColor,
-                  backgroundColor: `${skinConfig.shieldColor}30`,
-                }}
-              />
-            )}
-          </div>
-
-          <div className="flex-1 min-w-[150px]">
-            <div className="flex items-center justify-between text-xs mb-1">
-              <span className="font-extrabold text-neutral-100 tracking-wide font-display text-[13px]">
-                {skinConfig.name.toUpperCase()}
-              </span>
-              <span className="font-bold text-neutral-300">
-                {Math.ceil(player.hp)} / {player.maxHp} HP
-              </span>
-            </div>
-
-            {/* HP Bar */}
-            <div className="w-full h-3.5 bg-neutral-950 rounded-full p-0.5 border border-neutral-700/80 overflow-hidden relative">
-              <div
-                className={`h-full rounded-full transition-all duration-150 ${
-                  hpPercent > 50
-                    ? 'bg-gradient-to-r from-emerald-500 to-green-400'
-                    : hpPercent > 25
-                    ? 'bg-gradient-to-r from-amber-500 to-yellow-400'
-                    : 'bg-gradient-to-r from-red-600 to-rose-500 animate-pulse'
-                }`}
-                style={{ width: `${hpPercent}%` }}
-              />
-            </div>
-
-            {/* Shield Active Status */}
-            {player.shieldActive && (
-              <div
-                className="flex items-center gap-1.5 text-[11px] font-bold mt-1"
-                style={{ color: skinConfig.shieldColor }}
+                className="w-8 h-8 border border-neutral-950 relative rounded-sm flex flex-col items-center justify-center"
+                style={{ backgroundColor: skinConfig.primaryColor }}
               >
-                <Shield className="w-3.5 h-3.5 animate-spin" />
-                <span>{skinConfig.shieldName}: {player.shieldTimer.toFixed(1)}s</span>
+                {/* Ears */}
+                {player.skin.startsWith('perro') ? (
+                  <>
+                    <div
+                      className="absolute -top-1 -left-2 w-3 h-5 rounded-b-md border border-neutral-950 rotate-12"
+                      style={{ backgroundColor: skinConfig.secondaryColor }}
+                    />
+                    <div
+                      className="absolute -top-1 -right-2 w-3 h-5 rounded-b-md border border-neutral-950 -rotate-12"
+                      style={{ backgroundColor: skinConfig.secondaryColor }}
+                    />
+                  </>
+                ) : (
+                  <>
+                    <div
+                      className="absolute -top-1.5 left-0 w-2.5 h-2.5 border-t border-l border-neutral-950 rotate-12"
+                      style={{ backgroundColor: skinConfig.secondaryColor }}
+                    />
+                    <div
+                      className="absolute -top-1.5 right-0 w-2.5 h-2.5 border-t border-r border-neutral-950 -rotate-12"
+                      style={{ backgroundColor: skinConfig.secondaryColor }}
+                    />
+                  </>
+                )}
+                {/* Eyes */}
+                <div className="flex gap-2">
+                  <div className="w-1.5 h-2 bg-neutral-950 rounded-full" />
+                  <div className="w-1.5 h-2 bg-neutral-950 rounded-full" />
+                </div>
+                {/* Snout or smile */}
+                <div className="text-[7px] font-bold text-neutral-950 leading-none mt-0.5">
+                  {player.skin.startsWith('perro') ? '▼' : ':3'}
+                </div>
               </div>
-            )}
+              {player.shieldActive && (
+                <div
+                  className="absolute inset-0 border-2 rounded-lg animate-pulse"
+                  style={{
+                    borderColor: skinConfig.shieldColor,
+                    backgroundColor: `${skinConfig.shieldColor}30`,
+                  }}
+                />
+              )}
+            </div>
+
+            <div className="flex-1 min-w-[140px]">
+              <div className="flex items-center justify-between text-xs mb-1">
+                <span className="font-extrabold text-neutral-100 tracking-wide font-display text-[13px]">
+                  {skinConfig.name.toUpperCase()}
+                </span>
+                <span className="font-bold text-neutral-300">
+                  {Math.ceil(player.hp)} / {player.maxHp} HP
+                </span>
+              </div>
+
+              {/* HP Bar */}
+              <div className="w-full h-3.5 bg-neutral-950 rounded-full p-0.5 border border-neutral-700/80 overflow-hidden relative">
+                <div
+                  className={`h-full rounded-full transition-all duration-150 ${
+                    hpPercent > 50
+                      ? 'bg-gradient-to-r from-emerald-500 to-green-400'
+                      : hpPercent > 25
+                      ? 'bg-gradient-to-r from-amber-500 to-yellow-400'
+                      : 'bg-gradient-to-r from-red-600 to-rose-500 animate-pulse'
+                  }`}
+                  style={{ width: `${hpPercent}%` }}
+                />
+              </div>
+
+              {/* Shield Active Status */}
+              {player.shieldActive && (
+                <div
+                  className="flex items-center gap-1.5 text-[11px] font-bold mt-1"
+                  style={{ color: skinConfig.shieldColor }}
+                >
+                  <Shield className="w-3.5 h-3.5 animate-spin" />
+                  <span>{skinConfig.shieldName}: {player.shieldTimer.toFixed(1)}s</span>
+                </div>
+              )}
+            </div>
           </div>
+
+          {/* Multiplayer Squad Teammates List */}
+          {engine.isMultiplayer && engine.remotePlayers.size > 0 && (
+            <div className="bg-neutral-900/85 backdrop-blur-md border border-neutral-700/80 rounded-2xl p-2 shadow-xl flex flex-col gap-1.5 pointer-events-auto">
+              <div className="flex items-center justify-between text-[10px] font-black tracking-wider text-cyan-400">
+                <span>👥 EQUIPO ({engine.remotePlayers.size + 1})</span>
+                <span className="text-neutral-400 font-mono text-[9px]">WI-FI</span>
+              </div>
+              <div className="flex flex-col gap-1">
+                {Array.from(engine.remotePlayers.values()).map((mate) => {
+                  const mateHpPercent = Math.max(0, Math.min(100, (mate.hp / mate.maxHp) * 100));
+                  return (
+                    <div key={mate.id} className="flex items-center gap-2 text-xs">
+                      <span className="text-[11px] shrink-0">{mate.device === 'mobile' ? '📱' : '💻'}</span>
+                      <span className="font-bold text-neutral-200 truncate max-w-[85px] text-[11px] shrink-0">{mate.name}</span>
+                      <div className="flex-1 h-2 bg-neutral-950 rounded-full border border-neutral-800 overflow-hidden">
+                        <div
+                          className={`h-full rounded-full transition-all duration-150 ${
+                            !mate.isAlive
+                              ? 'bg-neutral-600'
+                              : mateHpPercent > 50
+                              ? 'bg-cyan-500'
+                              : mateHpPercent > 25
+                              ? 'bg-amber-500'
+                              : 'bg-red-500 animate-pulse'
+                          }`}
+                          style={{ width: `${mate.isAlive ? mateHpPercent : 0}%` }}
+                        />
+                      </div>
+                      <span className="text-[10px] font-mono text-neutral-400 shrink-0">
+                        {mate.isAlive ? `${Math.ceil(mate.hp)}` : '💀'}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Center: Stage Progress or Boss Bar */}
@@ -383,8 +465,8 @@ export const HUD: React.FC<HUDProps> = ({
             </div>
           )}
 
-          {/* Level 4: Santiscat Boss */}
-          {stage === 'santiscat_boss' && engine.santiscat && (
+          {/* Level 4: Santiscat Boss (Phase 1, Phase 2 Wormhole, Phase 2.5 Another Universe) */}
+          {(stage === 'santiscat_boss' || stage === 'santiscat_boss_wormhole' || stage === 'santiscat_boss_universe') && engine.santiscat && (
             <div className="bg-neutral-950/95 backdrop-blur-md border-2 border-purple-500/70 rounded-2xl p-2.5 shadow-2xl">
               <div className="flex items-center justify-between gap-2 mb-1">
                 <div className="flex items-center gap-2">
@@ -395,24 +477,113 @@ export const HUD: React.FC<HUDProps> = ({
                     className="w-7 h-7 rounded border border-purple-400 bg-neutral-900 object-cover"
                   />
                   <span className="font-black text-transparent bg-clip-text bg-gradient-to-r from-purple-400 via-fuchsia-300 to-cyan-400 font-display text-sm tracking-widest">
-                    SANTISCAT (JEFE CÓSMICO)
+                    {engine.santiscat.bossPhase === 1
+                      ? 'SANTISCAT (FASE 1)'
+                      : engine.santiscat.bossPhase === 2
+                      ? 'SANTISCAT DIOS CÓSMICO (FASE 2)'
+                      : 'SANTISCAT OMEGA (FASE 2.5: OTRO UNIVERSO)'}
                   </span>
                 </div>
-                <div className="text-xs font-bold text-neutral-300">
-                  {Math.ceil(engine.santiscat.hp)} / {engine.santiscat.maxHp} HP
+                <div className="flex items-center gap-2">
+                  <div className="text-xs font-bold text-neutral-300">
+                    {Math.ceil(engine.santiscat.hp).toLocaleString()} / {engine.santiscat.maxHp.toLocaleString()} HP
+                  </div>
+                  {onRematchSantiscat && (
+                    <button
+                      onClick={onRematchSantiscat}
+                      className="pointer-events-auto flex items-center gap-1 px-2 py-0.5 rounded-lg bg-purple-600/70 hover:bg-purple-600 text-[10px] font-black text-purple-200 hover:text-white border border-purple-400/50 shadow transition-all active:scale-95 cursor-pointer"
+                      title="Reiniciar la batalla contra Santiscat"
+                    >
+                      <RotateCcw className="w-3 h-3" />
+                      <span>Reintentar</span>
+                    </button>
+                  )}
                 </div>
               </div>
 
               {/* Boss HP Bar */}
               <div className="w-full h-3.5 bg-neutral-900 rounded-full p-0.5 border border-purple-900 overflow-hidden relative">
                 <div
-                  className="h-full bg-gradient-to-r from-purple-600 via-fuchsia-500 to-cyan-400 rounded-full transition-all duration-100"
+                  className={`h-full rounded-full transition-all duration-100 ${
+                    engine.santiscat.bossPhase >= 2
+                      ? 'bg-gradient-to-r from-fuchsia-600 via-rose-500 via-amber-400 to-cyan-400 shadow-[0_0_15px_#ec4899]'
+                      : 'bg-gradient-to-r from-purple-600 via-fuchsia-500 to-cyan-400'
+                  }`}
                   style={{ width: `${Math.max(0, (engine.santiscat.hp / engine.santiscat.maxHp) * 100)}%` }}
                 />
               </div>
 
+              {/* Phase 2: Wormhole Progress Bar */}
+              {stage === 'santiscat_boss_wormhole' && (
+                <div className="mt-1.5 bg-neutral-900/90 rounded-xl p-1.5 border border-fuchsia-500/50">
+                  <div className="flex justify-between items-center text-[10px] font-black text-fuchsia-300 mb-0.5">
+                    <span>🌀 VIAJE POR EL AGUJERO DE GUSANO (TÚNEL FRACTAL PSICODÉLICO)</span>
+                    <span className="text-cyan-300 font-mono">{Math.round(engine.santiscat.wormholeProgress)}%</span>
+                  </div>
+                  <div className="w-full h-2 bg-neutral-950 rounded-full overflow-hidden border border-neutral-700">
+                    <div
+                      className="h-full bg-gradient-to-r from-cyan-400 via-fuchsia-400 to-amber-300 rounded-full transition-all duration-150"
+                      style={{ width: `${Math.min(100, engine.santiscat.wormholeProgress)}%` }}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* 12 Human Souls Absorption Indicator */}
+              <div className="flex items-center justify-between gap-1 mt-1.5 px-1 py-1 rounded-lg bg-neutral-900/60 border border-neutral-800">
+                <span className="text-[9px] font-bold text-neutral-400">12 ALMAS:</span>
+                <div className="flex items-center gap-1">
+                  {engine.santiscat.souls?.map(soul => (
+                    <div
+                      key={soul.id}
+                      className={`w-2.5 h-2.5 rounded-full border transition-all ${
+                        soul.absorbed
+                          ? 'shadow-[0_0_6px] scale-110'
+                          : 'opacity-40 border-neutral-700'
+                      }`}
+                      style={{
+                        backgroundColor: soul.color,
+                        borderColor: soul.absorbed ? '#ffffff' : soul.glowColor,
+                        boxShadow: soul.absorbed ? `0 0 8px ${soul.color}` : 'none',
+                      }}
+                      title={`${soul.name} (${soul.trait}) - ${soul.absorbed ? 'Absorbida' : 'Pendiente'}`}
+                    />
+                  ))}
+                </div>
+              </div>
+
               {/* Boss Status Badges */}
-              <div className="flex items-center justify-center gap-2 mt-1.5 text-[11px] font-bold">
+              <div className="flex items-center justify-center gap-2 mt-1.5 text-[11px] font-bold flex-wrap">
+                {engine.santiscat.currentAttack === 'absorbing_souls' && (
+                  <span className="bg-purple-900/95 text-yellow-300 px-3 py-0.5 rounded-full border border-yellow-400 animate-pulse font-black">
+                    🌀 ¡ABSORBIENDO LAS 12 ALMAS HUMANAS DEL PORTAL SOMBRÍO!
+                  </span>
+                )}
+                {engine.santiscat.currentAttack === 'rainbow_blast' && (
+                  <span className="bg-gradient-to-r from-red-600 via-yellow-500 to-purple-600 text-white px-3 py-0.5 rounded-full border border-white animate-pulse font-black shadow-lg">
+                    🌈 ¡BLAST ARCOÍRIS GIGANTE! ESQUIVA A LA ZONA SEGURA
+                  </span>
+                )}
+                {engine.santiscat.currentAttack === 'spiral_galaxy' && (
+                  <span className="bg-indigo-900/90 text-cyan-200 px-2.5 py-0.5 rounded-full border border-cyan-400 font-bold">
+                    🌌 GALAXIAS ESPIRALES CORTANDO EL ESPACIO
+                  </span>
+                )}
+                {engine.santiscat.currentAttack === 'giant_stars' && (
+                  <span className="bg-amber-900/90 text-amber-200 px-2.5 py-0.5 rounded-full border border-amber-400 font-bold">
+                    💥 ESTRELLAS GIGANTES Y SUPERNOVAS DETONANDO
+                  </span>
+                )}
+                {engine.santiscat.omegaSave?.active && (
+                  <span className="bg-sky-950 text-sky-200 px-3 py-0.5 rounded-full border border-sky-400 animate-bounce font-mono font-black">
+                    💾 [{engine.santiscat.omegaSave.stateText || 'FILE 1 SAVED'}] REBOBINA TU POSICIÓN
+                  </span>
+                )}
+                {stage === 'santiscat_boss_universe' && (
+                  <span className="bg-red-950 text-red-200 px-3 py-0.5 rounded-full border border-red-500 animate-pulse font-bold">
+                    ❤️ ¡TE REHUSARÁS A MORIR SI TU VIDA LLEGA A 0!
+                  </span>
+                )}
                 {engine.santiscat.currentAttack === 'sun_burst' && (
                   <span className="bg-amber-600/90 text-white px-2.5 py-0.5 rounded-full border border-amber-300 animate-pulse">
                     ☀️ INVOCANDO SOL ({engine.santiscat.blackHole.sunShotsFired}/5 DISPAROS)
@@ -436,6 +607,15 @@ export const HUD: React.FC<HUDProps> = ({
                 {engine.santiscat.currentAttack === 'reality_slashes' && (
                   <span className="bg-cyan-700/90 text-white px-2.5 py-0.5 rounded-full border border-cyan-300 animate-pulse font-black">
                     ⚔️ ¡CORTES EN LA REALIDAD! FRACTURA DIMENSIONAL
+                  </span>
+                )}
+                {engine.santiscat.jujutsuSummons?.some(sm => sm.active) && (
+                  <span className="bg-purple-950 text-fuchsia-300 px-2.5 py-0.5 rounded-full border border-fuchsia-500/70 font-bold text-[10px] flex items-center gap-1.5 flex-wrap justify-center">
+                    <span>⛩️ Sukuna ({Math.ceil(engine.santiscat.jujutsuSummons[0]?.hp || 0)} / {engine.santiscat.jujutsuSummons[0]?.maxHp || 12000})</span>
+                    {engine.isSukunacatAttacking() && <span className="text-red-400 font-black animate-pulse">⚔️ ATACANDO</span>}
+                    <span>·</span>
+                    <span>♾️ Gojo ({Math.ceil(engine.santiscat.jujutsuSummons[1]?.hp || 0)} / {engine.santiscat.jujutsuSummons[1]?.maxHp || 12000})</span>
+                    {engine.isGojocatAttacking() && <span className="text-cyan-400 font-black animate-pulse">🌀 ATACANDO</span>}
                   </span>
                 )}
               </div>
@@ -468,16 +648,68 @@ export const HUD: React.FC<HUDProps> = ({
             </button>
           )}
 
-          {/* Admin Panel Button */}
-          {onOpenAdminModal && (
+          {/* Tabla de Vida / Health Scoreboard Button */}
+          {onOpenScoreboard && (
             <button
-              onClick={onOpenAdminModal}
-              className="pointer-events-auto flex items-center gap-1.5 px-3 py-2 rounded-2xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/50 text-amber-300 hover:text-amber-200 transition-colors shadow-lg active:scale-95 text-xs font-bold cursor-pointer"
-              title="Panel de Administrador (Desbloquear todo, trucos, saltos de nivel)"
+              onClick={onOpenScoreboard}
+              className="pointer-events-auto flex items-center gap-1.5 px-3 py-2 rounded-2xl bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/50 text-cyan-300 hover:text-cyan-200 transition-colors shadow-lg active:scale-95 text-xs font-bold cursor-pointer"
+              title="Tabla de Vida de Todos los Jugadores [TAB]"
             >
-              <Crown className="w-4 h-4 text-amber-400" />
-              <span className="hidden sm:inline">Admin</span>
+              <Heart className="w-4 h-4 text-cyan-400 fill-cyan-400" />
+              <span className="hidden sm:inline">Tabla de Vida</span>
             </button>
+          )}
+
+          {/* Logros / Achievements Button */}
+          {onOpenAchievements && (
+            <button
+              onClick={onOpenAchievements}
+              className="pointer-events-auto flex items-center gap-1.5 px-3 py-2 rounded-2xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/50 text-amber-300 hover:text-amber-200 transition-colors shadow-lg active:scale-95 text-xs font-bold cursor-pointer"
+              title="Sistema de Logros"
+            >
+              <Trophy className="w-4 h-4 text-amber-400" />
+              <span className="hidden sm:inline">Logros</span>
+            </button>
+          )}
+
+          {/* Misiones Secundarias / Side Quests Button */}
+          {onOpenMissions && (
+            <button
+              onClick={onOpenMissions}
+              className="pointer-events-auto flex items-center gap-1.5 px-3 py-2 rounded-2xl bg-cyan-600/20 hover:bg-cyan-600/30 border border-cyan-500/50 text-cyan-300 hover:text-cyan-200 transition-colors shadow-lg active:scale-95 text-xs font-bold cursor-pointer"
+              title="Misiones Secundarias: Aumenta tu daño contra edificios, asteroides y jefes"
+            >
+              <Target className="w-4 h-4 text-cyan-400" />
+              <span className="hidden sm:inline">Misiones</span>
+              {engine.sideQuests && (
+                <span className="px-1.5 py-0.5 rounded-md bg-cyan-500/30 text-[10px] text-cyan-200 font-mono font-bold">
+                  {engine.sideQuests.filter(q => q.completed).length}/{engine.sideQuests.length}
+                </span>
+              )}
+            </button>
+          )}
+
+          {/* Admin Panel Button (Locked until Santiscat defeated for non-host) */}
+          {onOpenAdminModal && (
+            canAdmin ? (
+              <button
+                onClick={onOpenAdminModal}
+                className="pointer-events-auto flex items-center gap-1.5 px-3 py-2 rounded-2xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/50 text-amber-300 hover:text-amber-200 transition-colors shadow-lg active:scale-95 text-xs font-bold cursor-pointer"
+                title="Panel de Administrador [F1]"
+              >
+                <Crown className="w-4 h-4 text-amber-400" />
+                <span className="hidden sm:inline">Admin</span>
+              </button>
+            ) : (
+              <button
+                onClick={onOpenAchievements}
+                className="pointer-events-auto flex items-center gap-1.5 px-3 py-2 rounded-2xl bg-neutral-800/80 hover:bg-neutral-800 border border-neutral-700 text-neutral-400 hover:text-neutral-300 transition-colors shadow-lg active:scale-95 text-xs font-bold cursor-pointer"
+                title="Panel de Admin bloqueado: Derrota a Santiscat para desbloquearlo"
+              >
+                <Lock className="w-4 h-4 text-amber-500/70" />
+                <span className="hidden sm:inline">Admin 🔒</span>
+              </button>
+            )
           )}
 
           {/* Sound Toggle */}
@@ -488,11 +720,26 @@ export const HUD: React.FC<HUDProps> = ({
           >
             {isMuted ? <VolumeX className="w-5 h-5 text-red-400" /> : <Volume2 className="w-5 h-5 text-green-400" />}
           </button>
+
+          {/* Touch Controls Toggle Button */}
+          {onToggleTouchControls && (
+            <button
+              onClick={onToggleTouchControls}
+              className={`pointer-events-auto p-2.5 rounded-2xl border transition-colors shadow-lg active:scale-95 text-xs font-bold cursor-pointer ${
+                showTouchControls
+                  ? 'bg-amber-500/20 text-amber-300 border-amber-500/60'
+                  : 'bg-neutral-900/90 hover:bg-neutral-800 text-neutral-400 border-neutral-700'
+              }`}
+              title="Mostrar / Ocultar controles táctiles en pantalla"
+            >
+              📱
+            </button>
+          )}
         </div>
       </div>
 
-      {/* Bottom Action Bar (Ability buttons + Visible Cooldowns) */}
-      <div className="flex flex-col items-center gap-2">
+      {/* Bottom Action Bar (Ability buttons + Visible Cooldowns - Hidden on mobile in favor of ergonomic TouchControls thumb cluster) */}
+      <div className="hidden md:flex flex-col items-center gap-2">
         <div className="flex items-center gap-2 pointer-events-auto bg-neutral-900/90 backdrop-blur-md border border-neutral-700/80 p-2 rounded-2xl shadow-2xl">
           {/* 1. Punch (Manos circulares) - Cooldown 0.75s */}
           <button
@@ -586,19 +833,24 @@ export const HUD: React.FC<HUDProps> = ({
             <span className="text-[9px] text-cyan-200 font-mono z-10">[3 / R]</span>
           </button>
 
-          {/* 5. Green Shield (Escudo Verde) - Cooldown 7.5s */}
+          {/* 5. Shield - Can be held with [K] or pressed */}
           <button
             onClick={onShield}
-            disabled={shieldCdPercent > 0 || player.shieldActive}
+            onMouseDown={() => engine.setHoldingShield(true)}
+            onMouseUp={() => engine.setHoldingShield(false)}
+            onTouchStart={() => engine.setHoldingShield(true)}
+            onTouchEnd={() => engine.setHoldingShield(false)}
+            disabled={shieldCdPercent > 0 && !engine.santiscat?.shrine?.active}
             className={`relative flex flex-col items-center justify-center w-14 h-14 rounded-xl border font-bold transition-all active:scale-95 overflow-hidden ${
               player.shieldActive
                 ? 'bg-emerald-600 border-emerald-300 text-white animate-pulse shadow-[0_0_15px_#10b981]'
-                : shieldCdPercent > 0
+                : shieldCdPercent > 0 && !engine.santiscat?.shrine?.active
                 ? 'bg-neutral-800/60 border-neutral-700 text-neutral-400 cursor-not-allowed'
-                : 'bg-gradient-to-b from-emerald-600/90 to-green-700/90 hover:from-emerald-500 hover:to-green-600 border-emerald-400/80 text-white shadow-md'
+                : 'bg-gradient-to-b from-emerald-600/90 to-green-700/90 hover:from-emerald-500 hover:to-green-600 border-emerald-400/80 text-white shadow-md cursor-pointer'
             }`}
+            title="Escudo [K / Shift / C] - Mantén presionado durante el Templo del Mal de Sukuna"
           >
-            {shieldCdPercent > 0 && (
+            {shieldCdPercent > 0 && !engine.santiscat?.shrine?.active && (
               <div
                 className="absolute inset-x-0 bottom-0 bg-neutral-950/75 transition-all"
                 style={{ height: `${shieldCdPercent}%` }}
@@ -608,11 +860,11 @@ export const HUD: React.FC<HUDProps> = ({
             <span className="text-[10px] font-black leading-none z-10">
               {player.shieldActive
                 ? `${player.shieldTimer.toFixed(1)}s`
-                : shieldCdPercent > 0
+                : shieldCdPercent > 0 && !engine.santiscat?.shrine?.active
                 ? `${player.shieldCooldown.toFixed(1)}s`
                 : 'ESCUDO'}
             </span>
-            <span className="text-[9px] text-emerald-200 font-mono z-10">[SHIFT / C]</span>
+            <span className="text-[9px] text-emerald-200 font-mono z-10">[K / SHIFT]</span>
           </button>
 
           {/* 6. Heal */}
@@ -767,7 +1019,7 @@ export const HUD: React.FC<HUDProps> = ({
           <span>Moverse: <strong className="text-neutral-200 font-mono">WASD / Flechas</strong></span> ·
           <span>Golpear: <strong className="text-neutral-200 font-mono">Espacio</strong></span> ·
           <span>Curarse: <strong className="text-emerald-400 font-mono">F ({player.healsRemaining}/{player.maxHeals})</strong></span> ·
-          <span>Escudo: <strong className="text-emerald-400 font-mono">Shift</strong></span> ·
+          <span>Escudo: <strong className="text-emerald-400 font-mono">K / Shift (Mantén en Dominio)</strong></span> ·
           <span>Poderes: <strong className="text-amber-400 font-mono">1, 2, 3, 4, 5</strong></span>
         </div>
       </div>

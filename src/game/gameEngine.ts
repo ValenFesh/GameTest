@@ -1,4 +1,6 @@
 import { soundManager } from '../audio/soundManager';
+import { multiplayerClient } from './multiplayerClient';
+import { MultiplayerPlayer } from '../types/multiplayer';
 import {
   AttackType,
   BlackFlashStrike,
@@ -20,6 +22,9 @@ import {
   RhythmGameState,
   SantiscatAttack,
   SantiscatBoss,
+  JujutsuSummon,
+  SantiscatDefeatCinematicState,
+  SantiscatDefeatPhase,
 } from '../types/game';
 import {
   CHARACTER_SKINS,
@@ -31,10 +36,36 @@ import {
   getAdminUnlockAll,
   saveAdminUnlockAll,
 } from './skins';
+import { unlockAchievement } from './achievements';
+import {
+  SideQuest,
+  ActivePowerBonuses,
+  getSavedSideQuests,
+  saveSideQuests,
+  resetSideQuests,
+  calculateActivePowerBonuses,
+  progressQuestItem,
+} from './sideQuests';
 
 export class GameEngine {
   public width: number = 960;
   public height: number = 600;
+
+  // Secondary Missions & Attack Power Scaling
+  public sideQuests: SideQuest[] = getSavedSideQuests();
+  public powerBonuses: ActivePowerBonuses = calculateActivePowerBonuses(this.sideQuests);
+  public onQuestCompletedCallback?: (quest: SideQuest) => void;
+  private survivorSecondTimer: number = 0;
+
+  // Multiplayer & Touch
+  public isMultiplayer: boolean = false;
+  public myPlayerId: string = '';
+  public remotePlayers: Map<string, MultiplayerPlayer> = new Map();
+  public isSpectating: boolean = false;
+  public spectatingTargetId: string | null = null;
+  public touchDx: number = 0;
+  public touchDy: number = 0;
+  private netSyncTimer: number = 0;
 
   public currentSkin: CharacterSkinId = 'catvalen';
   public nanovalenWins: number = 0;
@@ -45,6 +76,7 @@ export class GameEngine {
   public noCooldowns: boolean = false;
 
   public stage: GameStage = 'start';
+  public lastBattleStage: GameStage = 'city';
   public stageProgress: number = 0; // 0 to 100
   public stageTarget: number = 100;
   public screenShake: number = 0;
@@ -53,6 +85,7 @@ export class GameEngine {
   public boss: Boss | null = null;
   public drones: BossDrone[] = [];
   public cinematic: CinematicState | null = null;
+  public santiscatDefeatCinematic: SantiscatDefeatCinematicState | null = null;
   public obstacles: Obstacle[] = [];
   public projectiles: Projectile[] = [];
   public particles: Particle[] = [];
@@ -64,6 +97,7 @@ export class GameEngine {
   public santiscat: SantiscatBoss | null = null;
   public rhythmGame: RhythmGameState | null = null;
   public glitches: RealityGlitch[] = [];
+  public isSantiscatSummoning: boolean = false;
 
   public stats: GameStats = {
     score: 0,
@@ -82,8 +116,8 @@ export class GameEngine {
   private transitionTimer: number = 0;
   private bossIntroTimer: number = 0;
   private punchHandToggle: boolean = false;
-  private onGameOverCallback?: () => void;
-  private onVictoryCallback?: () => void;
+  public onGameOverCallback?: () => void;
+  public onVictoryCallback?: () => void;
 
   constructor(width: number, height: number) {
     this.width = width;
@@ -105,6 +139,421 @@ export class GameEngine {
   public setCallbacks(onGameOver: () => void, onVictory: () => void) {
     this.onGameOverCallback = onGameOver;
     this.onVictoryCallback = onVictory;
+  }
+
+  public setupMultiplayer(isMulti: boolean, myId: string) {
+    this.isMultiplayer = isMulti;
+    this.myPlayerId = myId;
+    this.remotePlayers.clear();
+    this.isSpectating = false;
+    this.spectatingTargetId = null;
+
+    if (!isMulti) return;
+
+    // Immediately populate existing room players so teammates are visible right away
+    if (multiplayerClient.currentRoom?.players) {
+      Object.values(multiplayerClient.currentRoom.players).forEach((p) => {
+        if (p.id !== this.myPlayerId) {
+          this.remotePlayers.set(p.id, {
+            ...p,
+            isAlive: p.isAlive !== false,
+          });
+        }
+      });
+    }
+
+    multiplayerClient.onRemotePlayerUpdate = (playerId, updated) => {
+      if (playerId === this.myPlayerId) return;
+      const existing = this.remotePlayers.get(playerId);
+      if (existing) {
+        Object.assign(existing, updated);
+        if (typeof updated.isAlive === 'boolean') {
+          existing.isAlive = updated.isAlive;
+        }
+      } else {
+        this.remotePlayers.set(playerId, {
+          ...updated,
+          isAlive: updated.isAlive !== false,
+        } as MultiplayerPlayer);
+      }
+    };
+
+    multiplayerClient.onRemotePlayerAttack = (attack) => {
+      if (attack.playerId === this.myPlayerId) return;
+      this.handleRemoteAttack(attack);
+    };
+
+    multiplayerClient.onBossHitBroadcast = (hit) => {
+      if (hit.playerId !== this.myPlayerId) {
+        if (hit.target === 'nanovalen' && this.boss) {
+          if (this.boss.shieldActive) {
+            soundManager.playShieldAbsorb();
+            this.damageNumbers.push({
+              id: Math.random().toString(),
+              text: '¡ABSORBIDO (ESCUDO)!',
+              x: hit.hitX,
+              y: hit.hitY - 15,
+              vy: -1.5,
+              color: '#ef4444',
+              isBlackFlash: false,
+              life: 0.9,
+              maxLife: 0.9,
+              scale: 1.1,
+            });
+          } else {
+            this.boss.hp = hit.remainingHp;
+            this.damageNumbers.push({
+              id: Math.random().toString(),
+              text: hit.isBlackFlash ? `★ TEAMMATE BLACK FLASH! -${hit.damage} ★` : `-${hit.damage}`,
+              x: hit.hitX,
+              y: hit.hitY - 15,
+              vy: -1.6,
+              color: hit.isBlackFlash ? '#ff003b' : '#38bdf8',
+              isBlackFlash: hit.isBlackFlash,
+              life: 1.1,
+              maxLife: 1.1,
+              scale: hit.isBlackFlash ? 1.4 : 1.1,
+            });
+            this.spawnHitParticles(hit.hitX, hit.hitY, hit.isBlackFlash ? '#ff003b' : '#38bdf8', 12);
+            if (this.boss.hp <= 0) {
+              this.triggerVictory();
+            }
+          }
+        } else if (hit.target === 'santiscat' && this.santiscat) {
+          this.santiscat.hp = hit.remainingHp;
+          this.damageNumbers.push({
+            id: Math.random().toString(),
+            text: hit.isBlackFlash ? `★ TEAMMATE BLACK FLASH! -${hit.damage} ★` : `-${hit.damage}`,
+            x: hit.hitX,
+            y: hit.hitY - 15,
+            vy: -1.6,
+            color: hit.isBlackFlash ? '#ff003b' : '#38bdf8',
+            isBlackFlash: hit.isBlackFlash,
+            life: 1.1,
+            maxLife: 1.1,
+            scale: hit.isBlackFlash ? 1.4 : 1.1,
+          });
+          this.spawnHitParticles(hit.hitX, hit.hitY, hit.isBlackFlash ? '#ff003b' : '#a855f7', 12);
+          if (this.santiscat.hp <= 0) {
+            if (this.santiscat.bossPhase === 1) {
+              this.startSantiscatPhase2Cinematic();
+            } else {
+              this.startSantiscatDefeatCinematic(false);
+            }
+          }
+        }
+      }
+    };
+
+    multiplayerClient.onObstacleHit = (hit) => {
+      if (hit.playerId === this.myPlayerId) return;
+
+      const obs = this.obstacles.find((o) => o.id === hit.obstacleId);
+      if (obs) {
+        obs.hp -= hit.damage;
+        this.spawnHitParticles(hit.hitX, hit.hitY, '#fb923c', 6);
+        if (hit.isDestroyed || obs.hp <= 0) {
+          this.destroyObstacle(obs, false);
+        }
+      } else if (hit.isDestroyed) {
+        const rubbleColor = hit.obstacleType === 'building' ? '#475569' : '#78716c';
+        this.spawnRubble(hit.hitX, hit.hitY, rubbleColor, 16);
+        soundManager.playExplosion();
+      }
+
+      this.stageProgress = Math.max(this.stageProgress, hit.stageProgress);
+
+      if (this.stage === 'city' && this.stageProgress >= 100) {
+        this.triggerCityToSpaceTransition();
+      } else if (this.stage === 'space' && this.stageProgress >= 100) {
+        this.triggerSpaceToBossTransition();
+      }
+    };
+
+    multiplayerClient.onBossAttack = (data) => {
+      this.handleRemoteBossAttack(data);
+    };
+
+    multiplayerClient.onSantiscatSummoned = ({ summonerId, summonerName }) => {
+      this.isSantiscatSummoning = true;
+      this.damageNumbers.push({
+        id: Math.random().toString(),
+        text: `⚡ ¡${summonerName} HA INVOCADO A SANTISCAT! ⚡`,
+        x: 1600,
+        y: 1100,
+        vy: -1.6,
+        color: '#fbbf24',
+        isBlackFlash: true,
+        life: 3.5,
+        maxLife: 3.5,
+        scale: 1.5,
+      });
+      soundManager.playSantiscatSummon();
+      if (summonerId !== this.myPlayerId) {
+        this.startStage('santiscat_boss');
+      }
+    };
+
+    multiplayerClient.onStageChanged = (newStage, progress) => {
+      if (this.stage !== newStage) {
+        this.startStage(newStage as GameStage);
+      }
+      this.stageProgress = progress;
+    };
+
+    multiplayerClient.onPlayerDeath = (deadPlayerId, deadName, allDead) => {
+      const p = this.remotePlayers.get(deadPlayerId);
+      if (p) {
+        p.isAlive = false;
+        p.isSpectating = true;
+      }
+      this.damageNumbers.push({
+        id: Math.random().toString(),
+        text: `💀 ${deadName} ha caído en combate`,
+        x: this.camera.x + this.camera.viewportWidth / 2,
+        y: this.camera.y + 100,
+        vy: -0.6,
+        color: '#f87171',
+        isBlackFlash: false,
+        life: 2.5,
+        maxLife: 2.5,
+        scale: 1.3,
+      });
+      if (allDead) {
+        this.triggerGameOver();
+      } else if (this.isSpectating && this.spectatingTargetId === deadPlayerId) {
+        this.spectateNext();
+      }
+    };
+
+    multiplayerClient.onGameOver = (deathReason) => {
+      if (deathReason) this.stats.deathReason = deathReason as any;
+      this.triggerGameOver();
+    };
+
+    multiplayerClient.onGameVictory = (isSantiscat) => {
+      this.triggerVictory(isSantiscat);
+    };
+  }
+
+  public handleRemoteAttack(attack: {
+    playerId: string;
+    attackType: string;
+    x: number;
+    y: number;
+    vx?: number;
+    vy?: number;
+    angle?: number;
+    facing?: number;
+    skin: CharacterSkinId;
+  }) {
+    const facing = attack.facing || 1;
+    switch (attack.attackType) {
+      case 'punch':
+        soundManager.playPunch();
+        this.spawnHitParticles(attack.x + facing * 35, attack.y, '#f8fafc', 8);
+        break;
+      case 'fireball':
+        soundManager.playFireball();
+        this.projectiles.push({
+          id: Math.random().toString(),
+          type: 'player_fireball',
+          x: attack.x,
+          y: attack.y,
+          vx: (attack.vx || 14) * facing,
+          vy: attack.vy || 0,
+          radius: 14,
+          damage: 48,
+          duration: 0,
+          maxDuration: 2.2,
+          color: '#f97316',
+          glowColor: '#ea580c',
+          trail: [],
+        });
+        break;
+      case 'lightning':
+        soundManager.playLightning();
+        this.projectiles.push({
+          id: Math.random().toString(),
+          type: 'player_lightning',
+          x: attack.x,
+          y: attack.y,
+          vx: (attack.vx || 24) * facing,
+          vy: 0,
+          radius: 12,
+          damage: 160,
+          duration: 0,
+          maxDuration: 1.5,
+          color: '#38bdf8',
+          glowColor: '#0284c7',
+          trail: [],
+        });
+        break;
+      case 'burst':
+        soundManager.playPowerBurst();
+        this.projectiles.push({
+          id: Math.random().toString(),
+          type: 'player_burst',
+          x: attack.x,
+          y: attack.y,
+          vx: (attack.vx || 16) * facing,
+          vy: attack.vy || 0,
+          radius: 8,
+          damage: 35,
+          duration: 0,
+          maxDuration: 1.8,
+          color: '#06b6d4',
+          glowColor: '#0891b2',
+          trail: [],
+        });
+        break;
+      case 'energy_blade':
+        soundManager.playEnergyBlades();
+        this.projectiles.push({
+          id: Math.random().toString(),
+          type: 'player_energy_blade',
+          x: attack.x,
+          y: attack.y,
+          vx: (attack.vx || 18) * facing,
+          vy: attack.vy || 0,
+          radius: 14,
+          damage: 75,
+          duration: 0,
+          maxDuration: 3.5,
+          color: '#f59e0b',
+          glowColor: '#d97706',
+          trail: [],
+        });
+        break;
+      case 'energy_anvil':
+        soundManager.playEnergyAnvil();
+        this.projectiles.push({
+          id: Math.random().toString(),
+          type: 'player_energy_anvil',
+          x: attack.x,
+          y: attack.y - 320,
+          vx: 0,
+          vy: 24,
+          radius: 42,
+          damage: 380,
+          duration: 0,
+          maxDuration: 1.6,
+          color: '#facc15',
+          glowColor: '#ca8a04',
+          trail: [],
+          targetY: attack.y,
+        });
+        break;
+      case 'light_laser':
+        soundManager.playLightLaser();
+        this.projectiles.push({
+          id: Math.random().toString(),
+          type: 'player_light_laser',
+          x: attack.x,
+          y: attack.y,
+          vx: (attack.vx || 26) * facing,
+          vy: 0,
+          radius: 16,
+          damage: 130,
+          duration: 0,
+          maxDuration: 1.6,
+          color: '#fef08a',
+          glowColor: '#eab308',
+          trail: [],
+        });
+        break;
+      case 'time_stop':
+        soundManager.playTimeStop();
+        this.screenShake = 22;
+        break;
+    }
+  }
+
+  public isHostPlayer(): boolean {
+    if (!this.isMultiplayer) return true;
+    return multiplayerClient.currentRoom?.hostId === this.myPlayerId;
+  }
+
+  public handleRemoteBossAttack(data: { bossType: 'nanovalen' | 'santiscat'; attackType: string; params: any }) {
+    if (data.bossType === 'nanovalen' && this.boss) {
+      this.executeRemoteNanovalenAttack(data.attackType, data.params);
+    } else if (data.bossType === 'santiscat' && this.santiscat) {
+      this.executeRemoteSantiscatAttack(data.attackType, data.params);
+    }
+  }
+
+  private executeRemoteNanovalenAttack(attackType: string, params: any) {
+    if (!this.boss) return;
+    const b = this.boss;
+    b.currentAttack = attackType as any;
+    b.attackTimer = 0;
+
+    if (attackType === 'laser_warning') {
+      b.laserY = params?.laserY ?? this.player.y;
+      b.laserHeight = 48;
+      soundManager.playLaserWarning();
+    } else if (attackType === 'energy_shield') {
+      b.shieldActive = true;
+      b.shieldTimer = 4.5;
+      soundManager.playShield();
+      b.attackCooldown = 4.0;
+      b.currentAttack = 'idle';
+    } else if (attackType === 'meteor_storm') {
+      soundManager.playExplosion();
+    } else if (attackType === 'gravity_pull') {
+      soundManager.playLaserWarning();
+      soundManager.playGravityPull();
+      b.pullTimer = 2.4;
+      b.pullHandExtended = 0;
+    } else if (attackType === 'gamma_ray_charge') {
+      this.startGammaRayBurst();
+    } else if (attackType === 'drone_spawn') {
+      soundManager.playLaserWarning();
+    }
+  }
+
+  private executeRemoteSantiscatAttack(attackType: string, params: any) {
+    if (!this.santiscat) return;
+    this.triggerSantiscatAttack(attackType as SantiscatAttack, false);
+    if (attackType === 'rainbow_blast' && params?.safeSide && this.santiscat.rainbowBlast) {
+      this.santiscat.rainbowBlast.safeSide = params.safeSide;
+    }
+  }
+
+  public spectateNext() {
+    const aliveRemotes = Array.from(this.remotePlayers.values()).filter(p => p.isAlive);
+    if (aliveRemotes.length === 0) {
+      this.spectatingTargetId = null;
+      return;
+    }
+    if (!this.spectatingTargetId) {
+      this.spectatingTargetId = aliveRemotes[0].id;
+      return;
+    }
+    const idx = aliveRemotes.findIndex(p => p.id === this.spectatingTargetId);
+    const nextIdx = (idx + 1) % aliveRemotes.length;
+    this.spectatingTargetId = aliveRemotes[nextIdx].id;
+    if (this.isMultiplayer) {
+      multiplayerClient.sendSpectate(this.spectatingTargetId);
+    }
+  }
+
+  public spectatePrev() {
+    const aliveRemotes = Array.from(this.remotePlayers.values()).filter(p => p.isAlive);
+    if (aliveRemotes.length === 0) {
+      this.spectatingTargetId = null;
+      return;
+    }
+    if (!this.spectatingTargetId) {
+      this.spectatingTargetId = aliveRemotes[0].id;
+      return;
+    }
+    const idx = aliveRemotes.findIndex(p => p.id === this.spectatingTargetId);
+    const prevIdx = (idx - 1 + aliveRemotes.length) % aliveRemotes.length;
+    this.spectatingTargetId = aliveRemotes[prevIdx].id;
+    if (this.isMultiplayer) {
+      multiplayerClient.sendSpectate(this.spectatingTargetId);
+    }
   }
 
   public setAdminUnlockAll(val: boolean) {
@@ -134,8 +583,9 @@ export class GameEngine {
   }
 
   public instaKillSantiscat() {
-    if (this.santiscat && this.stage === 'santiscat_boss') {
-      this.applyDamageToSantiscat(99999, 'punch', this.santiscat.x, this.santiscat.y);
+    if (this.santiscat) {
+      this.santiscat.hp = 0;
+      this.startSantiscatDefeatCinematic();
     }
   }
 
@@ -233,6 +683,7 @@ export class GameEngine {
       timeStopMaxDuration: 4.5,
 
       healRegenAccumulator: 0,
+      holdingShield: false,
     };
   }
 
@@ -243,6 +694,8 @@ export class GameEngine {
     this.projectiles = [];
     this.drones = [];
     this.blackFlashStrikes = [];
+
+    unlockAchievement('you_played');
 
     if (stage === 'city') {
       this.camera.worldWidth = this.width;
@@ -268,6 +721,28 @@ export class GameEngine {
     } else if (stage === 'santiscat_boss') {
       soundManager.playMusic('santiscat');
       this.initSantiscatBoss();
+    } else if (stage === 'santiscat_boss_wormhole') {
+      this.initSantiscatBoss();
+      if (this.santiscat) {
+        this.santiscat.bossPhase = 2;
+        this.santiscat.hp = 99999;
+        this.santiscat.maxHp = 99999;
+        this.santiscat.souls.forEach(soul => (soul.absorbed = true));
+      }
+      this.stage = 'santiscat_boss_wormhole';
+      soundManager.playMusic('santiscat_phase2');
+    } else if (stage === 'santiscat_boss_universe') {
+      this.initSantiscatBoss();
+      if (this.santiscat) {
+        this.santiscat.bossPhase = 2.5;
+        this.santiscat.hp = 99999;
+        this.santiscat.maxHp = 99999;
+        this.santiscat.souls.forEach(soul => (soul.absorbed = true));
+      }
+      this.stage = 'santiscat_boss_universe';
+      soundManager.playMusic('santiscat_phase25');
+    } else if (stage === 'cinematic_santiscat_defeat') {
+      this.startSantiscatDefeatCinematic();
     }
   }
 
@@ -275,6 +750,7 @@ export class GameEngine {
     soundManager.stopGammaSound();
     this.player = this.createInitialPlayer();
     this.cinematic = null;
+    this.santiscatDefeatCinematic = null;
     this.drones = [];
     this.santiscat = null;
     this.rhythmGame = null;
@@ -305,6 +781,7 @@ export class GameEngine {
     this.blackFlashStrikes = [];
     this.damageNumbers = [];
     this.cinematic = null;
+    this.santiscatDefeatCinematic = null;
     this.boss = null;
     this.santiscat = null;
     this.rhythmGame = null;
@@ -336,6 +813,13 @@ export class GameEngine {
       return;
     }
 
+    if (this.stage === 'cinematic_santiscat_defeat') {
+      if (code === 'Space' || code.toLowerCase() === 'space') {
+        this.skipSantiscatDefeatCinematic();
+      }
+      return;
+    }
+
     // In Distorted reality: interact with Ancient Altar
     if (this.stage === 'distorted' && (code === 'Space' || code === 'KeyE')) {
       const distToAltar = Math.hypot(this.player.x - 1600, this.player.y - 1200);
@@ -358,13 +842,14 @@ export class GameEngine {
       this.performHeal();
     } else if (code === 'Space' || code === 'KeyJ') {
       this.performPunch();
-    } else if (code === 'Digit1' || code === 'KeyQ' || code === 'KeyK') {
+    } else if (code === 'Digit1' || code === 'KeyQ') {
       this.performFireball();
     } else if (code === 'Digit2' || code === 'KeyE' || code === 'KeyL') {
       this.performLightning();
     } else if (code === 'Digit3' || code === 'KeyR' || code === 'KeyU') {
       this.performPowerBurst();
-    } else if (code === 'ShiftLeft' || code === 'ShiftRight' || code === 'KeyC') {
+    } else if (code === 'ShiftLeft' || code === 'ShiftRight' || code === 'KeyC' || code === 'KeyK') {
+      this.player.holdingShield = true;
       this.activateShield();
     } else if (code === 'Digit4' || code === 'KeyG') {
       this.performSpecial1();
@@ -375,13 +860,28 @@ export class GameEngine {
 
   public handleKeyUp(code: string) {
     this.keys[code.toLowerCase()] = false;
+    if (code === 'KeyK' || code === 'ShiftLeft' || code === 'ShiftRight' || code === 'KeyC') {
+      this.player.holdingShield = false;
+    }
+  }
+
+  public setHoldingShield(holding: boolean) {
+    this.player.holdingShield = holding;
+    if (holding) {
+      this.activateShield();
+    }
   }
 
   public setTouchDirection(dx: number, dy: number) {
     if (this.stage === 'gameover' || this.stage === 'victory' || this.stage === 'cinematic_earth_destruction') return;
+    this.touchDx = dx;
+    this.touchDy = dy;
     const speed = 7.5;
     this.player.vx = dx * speed;
     this.player.vy = dy * speed;
+    // Prompt: "que catvalen pueda voltearse para tirar ataques hacia la izquierda"
+    if (dx < -0.2) this.player.facing = -1;
+    else if (dx > 0.2) this.player.facing = 1;
   }
 
   // --- Catvalen Actions with Cooldowns ---
@@ -405,8 +905,8 @@ export class GameEngine {
 
     soundManager.playPunch();
 
-    // Melee hitbox in front of player
-    const punchX = this.player.x + 40;
+    // Melee hitbox in facing direction
+    const punchX = this.player.x + (this.player.facing * 40);
     const punchY = this.player.y;
     const punchRange = 65;
 
@@ -433,12 +933,29 @@ export class GameEngine {
       }
     }
 
-    // Check hit on Santiscat Boss in Level 4
-    if (this.santiscat && this.stage === 'santiscat_boss') {
+    // Check hit on Santiscat Boss in Level 4 (Phase 1, Wormhole, Another Universe)
+    if (this.santiscat && (this.stage === 'santiscat_boss' || this.stage === 'santiscat_boss_wormhole' || this.stage === 'santiscat_boss_universe')) {
       const sDist = Math.hypot(punchX - this.santiscat.x, punchY - this.santiscat.y);
-      if (sDist < 120) {
+      if (sDist < 140) {
         this.applyDamageToSantiscat(55, 'punch', punchX, punchY);
       }
+      // Check hit on Jujutsu Summons (Sukunacat & Gojocat)
+      if (this.santiscat.jujutsuSummons) {
+        this.santiscat.jujutsuSummons.forEach(sm => {
+          if (sm.active && Math.hypot(punchX - sm.x, punchY - sm.y) < punchRange + sm.width / 2) {
+            this.applyDamageToSummon(sm, 65, 'punch', punchX, punchY);
+          }
+        });
+      }
+    }
+
+    if (this.isMultiplayer) {
+      multiplayerClient.sendPlayerAttack({
+        attackType: 'punch',
+        x: punchX,
+        y: punchY,
+        facing: this.player.facing,
+      });
     }
 
     return true;
@@ -460,12 +977,15 @@ export class GameEngine {
 
     soundManager.playFireball();
 
+    const spawnX = this.player.x + (this.player.facing * 35);
+    const spawnY = this.player.y;
+
     this.projectiles.push({
       id: Math.random().toString(),
       type: 'player_fireball',
-      x: this.player.x + 35,
-      y: this.player.y,
-      vx: 13,
+      x: spawnX,
+      y: spawnY,
+      vx: 13 * this.player.facing,
       vy: (Math.random() - 0.5) * 1.2,
       radius: 14,
       damage: 85,
@@ -475,6 +995,16 @@ export class GameEngine {
       glowColor: '#ea580c',
       trail: [],
     });
+
+    if (this.isMultiplayer) {
+      multiplayerClient.sendPlayerAttack({
+        attackType: 'fireball',
+        x: spawnX,
+        y: spawnY,
+        vx: 13,
+        facing: this.player.facing,
+      });
+    }
 
     return true;
   }
@@ -495,13 +1025,16 @@ export class GameEngine {
 
     soundManager.playLightning();
 
-    // High velocity piercing lightning spear
+    const spawnX = this.player.x + (this.player.facing * 40);
+    const spawnY = this.player.y;
+
+    // High velocity piercing lightning spear in facing direction
     this.projectiles.push({
       id: Math.random().toString(),
       type: 'player_lightning',
-      x: this.player.x + 40,
-      y: this.player.y,
-      vx: 24,
+      x: spawnX,
+      y: spawnY,
+      vx: 24 * this.player.facing,
       vy: 0,
       radius: 12,
       damage: 160,
@@ -511,6 +1044,16 @@ export class GameEngine {
       glowColor: '#0284c7',
       trail: [],
     });
+
+    if (this.isMultiplayer) {
+      multiplayerClient.sendPlayerAttack({
+        attackType: 'lightning',
+        x: spawnX,
+        y: spawnY,
+        vx: 24,
+        facing: this.player.facing,
+      });
+    }
 
     return true;
   }
@@ -525,7 +1068,10 @@ export class GameEngine {
 
     this.player.powerBurstCooldown = this.player.powerBurstMaxCooldown;
 
-    // Fire 3 staggered energy bursts
+    const spawnX = this.player.x + (this.player.facing * 35);
+    const spawnY = this.player.y;
+
+    // Fire 3 staggered energy bursts in facing direction
     [-6, 0, 6].forEach((angleDeg, i) => {
       setTimeout(() => {
         if (this.stage === 'gameover' || this.stage === 'victory' || this.stage === 'cinematic_earth_destruction') return;
@@ -534,9 +1080,9 @@ export class GameEngine {
         this.projectiles.push({
           id: Math.random().toString(),
           type: 'player_burst',
-          x: this.player.x + 35,
-          y: this.player.y + (i - 1) * 7,
-          vx: Math.cos(rad) * 16,
+          x: spawnX,
+          y: spawnY + (i - 1) * 7,
+          vx: Math.cos(rad) * 16 * this.player.facing,
           vy: Math.sin(rad) * 16,
           radius: 8,
           damage: 35,
@@ -548,6 +1094,16 @@ export class GameEngine {
         });
       }, i * 65);
     });
+
+    if (this.isMultiplayer) {
+      multiplayerClient.sendPlayerAttack({
+        attackType: 'burst',
+        x: spawnX,
+        y: spawnY,
+        vx: 16,
+        facing: this.player.facing,
+      });
+    }
 
     return true;
   }
@@ -738,7 +1294,7 @@ export class GameEngine {
       }
 
       case 'gato_negro_blanco': {
-        // Manipulación / Control mental: Nanovalen se pega solo
+        // Manipulación / Control mental: Nanovalen se pega solo o aturde a Santiscat
         p.special1Cooldown = 8.0;
         p.special1MaxCooldown = 8.0;
         soundManager.playMindControl();
@@ -758,11 +1314,26 @@ export class GameEngine {
             maxLife: 1.5,
             scale: 1.35,
           });
+        } else if (this.santiscat && (this.stage === 'santiscat_boss' || this.stage === 'santiscat_boss_wormhole' || this.stage === 'santiscat_boss_universe')) {
+          this.applyDamageToSantiscat(260, 'mind_control', this.santiscat.x, this.santiscat.y);
+          this.damageNumbers.push({
+            id: Math.random().toString(),
+            text: '🧠 ¡CONTROL MENTAL: SOBRECARGA PSÍQUICA (-260)!',
+            x: this.santiscat.x,
+            y: this.santiscat.y - 35,
+            vy: -1.6,
+            color: '#d946ef',
+            isBlackFlash: false,
+            life: 1.5,
+            maxLife: 1.5,
+            scale: 1.35,
+          });
+          this.spawnHitParticles(this.santiscat.x, this.santiscat.y, '#d946ef', 22);
         } else {
-          // In city/space: telekinetic shockwave destroys closest 3 obstacles
+          // In city/space/distorted: telekinetic shockwave destroys closest 3 obstacles
           let crushed = 0;
           this.obstacles.forEach(obs => {
-            if (crushed < 3 && obs.x > p.x) {
+            if (crushed < 3 && (p.facing === 1 ? obs.x > p.x : obs.x < p.x)) {
               this.applyDamageToObstacle(obs, 220, 'mind_control', obs.x + 20, obs.y + 20);
               crushed++;
             }
@@ -781,9 +1352,9 @@ export class GameEngine {
         this.projectiles.push({
           id: Math.random().toString(),
           type: 'player_light_laser',
-          x: p.x + 40,
+          x: p.x + (p.facing * 40),
           y: p.y,
-          vx: 36,
+          vx: 36 * p.facing,
           vy: 0,
           radius: 16,
           damage: 220,
@@ -794,22 +1365,44 @@ export class GameEngine {
           trail: [],
         });
 
-        // Instant pierce damage to all obstacles in line
+        // Instant pierce damage to all obstacles in facing line
         this.obstacles.forEach(obs => {
-          if (Math.abs(p.y - (obs.y + obs.height / 2)) < obs.height / 2 + 25 && obs.x > p.x) {
+          const inLineX = p.facing === 1 ? obs.x > p.x : obs.x < p.x;
+          if (Math.abs(p.y - (obs.y + obs.height / 2)) < obs.height / 2 + 25 && inLineX) {
             this.applyDamageToObstacle(obs, 220, 'light_laser', obs.x + 20, p.y);
           }
         });
 
-        // Instant pierce damage to all drones in line
+        // Instant pierce damage to all drones in facing line
         this.drones.forEach(d => {
-          if (Math.abs(p.y - d.y) < d.size + 25 && d.x > p.x) {
+          const inLineD = p.facing === 1 ? d.x > p.x : d.x < p.x;
+          if (Math.abs(p.y - d.y) < d.size + 25 && inLineD) {
             this.damageDrone(d, 220, d.x, p.y);
           }
         });
 
-        if (this.boss && this.stage === 'boss' && Math.abs(p.y - this.boss.y) < 70 && this.boss.x > p.x) {
-          this.applyDamageToBoss(240, 'light_laser', this.boss.x, p.y, false);
+        if (this.boss && this.stage === 'boss' && Math.abs(p.y - this.boss.y) < 70) {
+          const inLineB = p.facing === 1 ? this.boss.x > p.x : this.boss.x < p.x;
+          if (inLineB) {
+            this.applyDamageToBoss(240, 'light_laser', this.boss.x, p.y, false);
+          }
+        }
+
+        if (this.santiscat && (this.stage === 'santiscat_boss' || this.stage === 'santiscat_boss_wormhole' || this.stage === 'santiscat_boss_universe') && Math.abs(p.y - this.santiscat.y) < 120) {
+          const inLineS = p.facing === 1 ? this.santiscat.x > p.x : this.santiscat.x < p.x;
+          if (inLineS) {
+            this.applyDamageToSantiscat(240, 'light_laser', this.santiscat.x, p.y);
+          }
+        }
+
+        if (this.isMultiplayer) {
+          multiplayerClient.sendPlayerAttack({
+            attackType: 'light_laser',
+            x: p.x + (p.facing * 40),
+            y: p.y,
+            vx: 36,
+            facing: p.facing,
+          });
         }
         return true;
       }
@@ -825,9 +1418,9 @@ export class GameEngine {
           this.projectiles.push({
             id: Math.random().toString(),
             type: 'player_magic_orb',
-            x: p.x + 35,
+            x: p.x + (p.facing * 35),
             y: p.y + (i - 1) * 10,
-            vx: Math.cos(rad) * 14,
+            vx: Math.cos(rad) * 14 * p.facing,
             vy: Math.sin(rad) * 14,
             radius: 12,
             damage: 85,
@@ -842,39 +1435,68 @@ export class GameEngine {
       }
 
       case 'perro_rubio': {
-        // Creación de objetos de la nada: Yunque masivo de energía cósmica
+        // Creación de objetos de la nada: Yunque masivo de energía cósmica (Fermin - Funciona en todos los niveles)
         p.special1Cooldown = 5.5;
         p.special1MaxCooldown = 5.5;
         soundManager.playEnergyAnvil();
 
-        const targetX = this.boss && this.stage === 'boss' ? this.boss.x : p.x + 220;
+        let targetX = p.x + (p.facing * 200);
+        let targetY = p.y + 20;
+
+        if (this.santiscat && (this.stage === 'santiscat_boss' || this.stage === 'santiscat_boss_wormhole' || this.stage === 'santiscat_boss_universe')) {
+          targetX = this.santiscat.x;
+          targetY = this.santiscat.y + 25;
+        } else if (this.boss && this.stage === 'boss') {
+          targetX = this.boss.x;
+          targetY = this.boss.y + 25;
+        } else if (this.obstacles.length > 0) {
+          const fwd = this.obstacles.filter(o => p.facing === 1 ? o.x > p.x : o.x < p.x);
+          if (fwd.length > 0) {
+            targetX = fwd[0].x + fwd[0].width / 2;
+            targetY = fwd[0].y + fwd[0].height / 2;
+          }
+        }
+
+        // Start from high above the target level within view, guaranteeing it is never culled by y > -150
+        const startY = targetY - 260;
+
         this.projectiles.push({
           id: Math.random().toString(),
           type: 'player_energy_anvil',
           x: targetX,
-          y: -80,
+          y: startY,
           vx: 0,
-          vy: 16,
-          radius: 32,
-          damage: 320,
+          vy: 22,
+          radius: 46,
+          damage: 450,
           duration: 0,
-          maxDuration: 2.5,
+          maxDuration: 3.5,
           color: '#facc15',
           glowColor: '#ca8a04',
           trail: [],
+          targetY,
         });
+
+        if (this.isMultiplayer) {
+          multiplayerClient.sendPlayerAttack({
+            attackType: 'energy_anvil',
+            x: targetX,
+            y: targetY,
+            facing: p.facing,
+          });
+        }
         return true;
       }
 
       case 'perro_marron': {
-        // Detener el tiempo: se pausa todo menos el jugador y puede atacar a Nanovalen
+        // Detener el tiempo: se pausa todo (Nanovalen, Santiscat, enemigos, proyectiles, mundo) menos Tina (Tina - Funciona en todos los niveles)
         p.special1Cooldown = 12.0;
         p.special1MaxCooldown = 12.0;
         p.timeStopActive = true;
         p.timeStopTimer = 4.5;
         p.timeStopMaxDuration = 4.5;
         soundManager.playTimeStop();
-        this.screenShake = 16;
+        this.screenShake = 18;
         this.damageNumbers.push({
           id: Math.random().toString(),
           text: '⏳ ¡TIEMPO DETENIDO (4.5s)!',
@@ -887,6 +1509,15 @@ export class GameEngine {
           maxLife: 1.8,
           scale: 1.4,
         });
+
+        if (this.isMultiplayer) {
+          multiplayerClient.sendPlayerAttack({
+            attackType: 'time_stop',
+            x: p.x,
+            y: p.y,
+            facing: p.facing,
+          });
+        }
         return true;
       }
 
@@ -912,7 +1543,7 @@ export class GameEngine {
 
     switch (p.skin) {
       case 'gato_negro_blanco': {
-        // Desactivar escudo de Nanovalen
+        // Desactivar escudo de Nanovalen o Santiscat
         p.special2Cooldown = 7.0;
         p.special2MaxCooldown = 7.0;
         soundManager.playShieldBreak();
@@ -933,7 +1564,25 @@ export class GameEngine {
             scale: 1.35,
           });
           this.spawnHitParticles(this.boss.x, this.boss.y, '#c084fc', 22);
-        } else {
+        }
+        if (this.santiscat) {
+          this.santiscat.shieldActive = false;
+          this.santiscat.shieldTimer = 0;
+          this.damageNumbers.push({
+            id: Math.random().toString(),
+            text: '💥 ¡ESCUDO DE SANTISCAT DESACTIVADO!',
+            x: this.santiscat.x,
+            y: this.santiscat.y - 30,
+            vy: -1.5,
+            color: '#c084fc',
+            isBlackFlash: false,
+            life: 1.4,
+            maxLife: 1.4,
+            scale: 1.35,
+          });
+          this.spawnHitParticles(this.santiscat.x, this.santiscat.y, '#c084fc', 22);
+        }
+        if (!this.boss && !this.santiscat) {
           // Repel obstacles
           this.obstacles.forEach(o => {
             o.x += 120;
@@ -948,7 +1597,14 @@ export class GameEngine {
         p.special2Cooldown = 3.5;
         p.special2MaxCooldown = 3.5;
         soundManager.playLightLaser();
-        p.x = Math.min(this.width - 50, p.x + 220);
+        const isLevel4Stage =
+          this.stage === 'distorted' ||
+          this.stage === 'rhythm_summon' ||
+          this.stage === 'santiscat_boss' ||
+          this.stage === 'santiscat_boss_wormhole' ||
+          this.stage === 'santiscat_boss_universe';
+        const maxX = isLevel4Stage ? this.camera.worldWidth - 50 : this.width - 50;
+        p.x = Math.max(50, Math.min(maxX, p.x + p.facing * 240));
         p.isInvulnerable = true;
         p.invulnerableTimer = 1.2;
         this.spawnHitParticles(p.x, p.y, '#facc15', 18);
@@ -956,7 +1612,7 @@ export class GameEngine {
       }
 
       case 'perro_rubio': {
-        // Crear 4 espadas de energía materializadas que buscan enemigos
+        // Crear 4 espadas de energía materializadas que buscan enemigos (Fermin - Funciona en todos los niveles)
         p.special2Cooldown = 3.8;
         p.special2MaxCooldown = 3.8;
         soundManager.playEnergyBlades();
@@ -965,43 +1621,137 @@ export class GameEngine {
           this.projectiles.push({
             id: Math.random().toString(),
             type: 'player_energy_blade',
-            x: p.x + 30,
+            x: p.x + (p.facing * 30),
             y: p.y + (i - 1.5) * 14,
-            vx: Math.cos(rad) * 18,
+            vx: Math.cos(rad) * 18 * p.facing,
             vy: Math.sin(rad) * 18,
             radius: 14,
-            damage: 65,
+            damage: 75,
             duration: 0,
-            maxDuration: 2.8,
+            maxDuration: 3.5,
             color: '#f59e0b',
             glowColor: '#d97706',
             trail: [],
           });
         });
+
+        if (this.isMultiplayer) {
+          multiplayerClient.sendPlayerAttack({
+            attackType: 'energy_blade',
+            x: p.x + (p.facing * 30),
+            y: p.y,
+            vx: 18,
+            facing: p.facing,
+          });
+        }
         return true;
       }
 
       case 'perro_marron': {
-        // Teletransporte crono
+        // Teletransporte crono (Tina - Funciona en todos los niveles, incluyendo detrás de Santiscat y en mundo libre)
         p.special2Cooldown = 3.2;
         p.special2MaxCooldown = 3.2;
         soundManager.playTeleport();
-        if (this.boss && this.stage === 'boss') {
-          // Teletransporte directamente a la espalda de Nanovalen para atacarlo
-          p.x = Math.min(this.width - 45, this.boss.x + 85);
-          p.y = this.boss.y;
+
+        const isLevel4Stage =
+          this.stage === 'distorted' ||
+          this.stage === 'rhythm_summon' ||
+          this.stage === 'santiscat_boss' ||
+          this.stage === 'santiscat_boss_wormhole' ||
+          this.stage === 'santiscat_boss_universe';
+        const maxX = isLevel4Stage ? this.camera.worldWidth - 60 : this.width - 60;
+        const minX = 60;
+        const maxY = isLevel4Stage ? this.camera.worldHeight - 60 : this.height - 60;
+        const minY = 60;
+
+        if (this.santiscat && (this.stage === 'santiscat_boss' || this.stage === 'santiscat_boss_wormhole' || this.stage === 'santiscat_boss_universe')) {
+          // Teletransporte directamente a la espalda de Santiscat en dirección contraria a su mirada
+          const behindOffset = this.santiscat.facing === 1 ? -120 : 120;
+          p.x = Math.max(minX, Math.min(maxX, this.santiscat.x + behindOffset));
+          p.y = Math.max(minY, Math.min(maxY, this.santiscat.y));
+          p.facing = this.santiscat.facing === 1 ? 1 : -1;
+        } else if (this.boss && this.stage === 'boss') {
+          // Teletransporte directamente a la espalda de Nanovalen
+          p.x = Math.max(minX, Math.min(maxX, this.boss.x + 90));
+          p.y = Math.max(minY, Math.min(maxY, this.boss.y));
+          p.facing = -1;
         } else {
-          p.x = Math.min(this.width - 55, p.x + 230);
+          // Salto temporal instantáneo hacia adelante en dirección facing
+          p.x = Math.max(minX, Math.min(maxX, p.x + p.facing * 260));
         }
+
         p.isInvulnerable = true;
-        p.invulnerableTimer = 0.6;
-        this.spawnHitParticles(p.x, p.y, '#f59e0b', 16);
+        p.invulnerableTimer = 0.8;
+        this.spawnHitParticles(p.x, p.y, '#f59e0b', 22);
+        this.spawnHitParticles(p.x, p.y, '#facc15', 18);
         return true;
       }
 
       default:
         return false;
     }
+  }
+
+  // --- Secondary Missions & Attack Power System ---
+
+  public getDamageMultiplier(target: 'building' | 'asteroid' | 'boss' | 'santiscat', attackType?: AttackType): number {
+    let mult = 1.0;
+    if (!this.powerBonuses) return mult;
+
+    // Global bonus from completing all or combat missions
+    mult *= (this.powerBonuses.globalMultiplier || 1.0);
+
+    if (target === 'building') {
+      mult *= (this.powerBonuses.buildingMultiplier || 1.0);
+      if (attackType === 'punch') {
+        mult *= (this.powerBonuses.punchMultiplier || 1.0);
+      } else if (attackType === 'fireball') {
+        mult *= (this.powerBonuses.fireMultiplier || 1.0);
+      } else if (attackType === 'lightning') {
+        mult *= (this.powerBonuses.lightningMultiplier || 1.0);
+      }
+    } else if (target === 'asteroid') {
+      mult *= (this.powerBonuses.asteroidMultiplier || 1.0);
+      if (attackType === 'power_burst' || attackType === 'light_laser') {
+        mult *= (this.powerBonuses.lightningMultiplier || 1.0);
+      }
+    } else if (target === 'boss' || target === 'santiscat') {
+      mult *= (this.powerBonuses.bossMultiplier || 1.0);
+    }
+
+    return mult;
+  }
+
+  public progressQuest(questId: string, amount: number = 1) {
+    const { quests, newlyCompletedQuest } = progressQuestItem(this.sideQuests, questId, amount);
+    this.sideQuests = quests;
+    saveSideQuests(this.sideQuests);
+    this.powerBonuses = calculateActivePowerBonuses(this.sideQuests);
+
+    if (newlyCompletedQuest) {
+      soundManager.playQuestComplete();
+      this.damageNumbers.push({
+        id: Math.random().toString(),
+        text: `🎯 ¡MISIÓN: ${newlyCompletedQuest.title}! (${newlyCompletedQuest.rewardText})`,
+        x: this.player ? this.player.x : this.width / 2,
+        y: this.player ? this.player.y - 45 : 100,
+        vy: -1.6,
+        color: '#fbbf24',
+        isBlackFlash: true,
+        life: 3.5,
+        maxLife: 3.5,
+        scale: 1.4,
+      });
+
+      if (this.onQuestCompletedCallback) {
+        this.onQuestCompletedCallback(newlyCompletedQuest);
+      }
+    }
+  }
+
+  public resetQuests() {
+    this.sideQuests = resetSideQuests();
+    this.powerBonuses = calculateActivePowerBonuses(this.sideQuests);
   }
 
   // --- Black Flash Critical Hit System (2% Chance) ---
@@ -1012,9 +1762,11 @@ export class GameEngine {
     const isBlackFlash = Math.random() < 0.02;
 
     if (isBlackFlash) {
-      const critDamage = Math.round(baseDamage * 2.5);
+      const critMultiplier = 2.5 * (this.powerBonuses?.critMultiplier || 1.0);
+      const critDamage = Math.round(baseDamage * critMultiplier);
       this.stats.blackFlashesCount++;
       soundManager.playBlackFlash();
+      this.progressQuest('black_flash_master', 1);
 
       // Screen shake distortion
       this.screenShake = 16;
@@ -1072,35 +1824,72 @@ export class GameEngine {
   // --- Obstacle Damage & Destruction ---
 
   private applyDamageToObstacle(obs: Obstacle, baseDmg: number, _attackType: AttackType, hitX: number, hitY: number) {
-    const { damage, isBlackFlash } = this.rollBlackFlash(baseDmg, hitX, hitY);
+    const targetType = obs.type === 'asteroid' || obs.type === 'meteorite' ? 'asteroid' : 'building';
+    const questMult = this.getDamageMultiplier(targetType, _attackType);
+    const modifiedBaseDmg = Math.round(baseDmg * questMult);
+    const { damage, isBlackFlash } = this.rollBlackFlash(modifiedBaseDmg, hitX, hitY);
     obs.hp -= damage;
     this.stats.totalAttacksLanded++;
     this.stats.score += damage;
 
     if (!isBlackFlash) {
+      const isEmpowered = questMult > 1.05;
       this.damageNumbers.push({
         id: Math.random().toString(),
-        text: `-${damage}`,
+        text: isEmpowered ? `-${damage} ⚡` : `-${damage}`,
         x: hitX,
         y: hitY - 10,
         vy: -1.2,
-        color: '#fed7aa',
+        color: isEmpowered ? '#facc15' : '#fed7aa',
         isBlackFlash: false,
         life: 0.8,
         maxLife: 0.8,
-        scale: 1.0,
+        scale: isEmpowered ? 1.15 : 1.0,
       });
     }
 
     // Impact sparks
     this.spawnHitParticles(hitX, hitY, isBlackFlash ? '#ff1a3c' : '#fb923c', 8);
 
+    // Quest progression
+    if (obs.type === 'building') {
+      if (_attackType === 'lightning') {
+        this.progressQuest('cosmic_lightning_urban', 1);
+      }
+      if (obs.hp <= 0) {
+        if (_attackType === 'punch') {
+          this.progressQuest('demolisher_punch', 1);
+        } else if (_attackType === 'fireball') {
+          this.progressQuest('fire_storm_city', 1);
+        }
+      }
+    } else if (obs.type === 'asteroid' || obs.type === 'meteorite') {
+      if (obs.hp <= 0) {
+        this.progressQuest('asteroid_shredder', 1);
+        if (_attackType === 'power_burst' || _attackType === 'light_laser') {
+          this.progressQuest('power_burst_cosmic', 1);
+        }
+      }
+    }
+
+    if (this.isMultiplayer) {
+      multiplayerClient.sendObstacleHit({
+        obstacleId: obs.id,
+        damage,
+        hitX,
+        hitY,
+        isDestroyed: obs.hp <= 0,
+        obstacleType: obs.type as any,
+        stageProgress: this.stageProgress,
+      });
+    }
+
     if (obs.hp <= 0) {
-      this.destroyObstacle(obs);
+      this.destroyObstacle(obs, true);
     }
   }
 
-  private destroyObstacle(obs: Obstacle) {
+  public destroyObstacle(obs: Obstacle, broadcast: boolean = true) {
     soundManager.playExplosion();
     this.screenShake = Math.max(this.screenShake, 7);
 
@@ -1139,6 +1928,18 @@ export class GameEngine {
       this.stageProgress = Math.min(100, this.stageProgress + 8);
     }
 
+    if (broadcast && this.isMultiplayer) {
+      multiplayerClient.sendObstacleHit({
+        obstacleId: obs.id,
+        damage: 999,
+        hitX: obs.x + obs.width / 2,
+        hitY: obs.y + obs.height / 2,
+        isDestroyed: true,
+        obstacleType: obs.type as any,
+        stageProgress: this.stageProgress,
+      });
+    }
+
     // Remove from array
     this.obstacles = this.obstacles.filter(o => o.id !== obs.id);
 
@@ -1171,6 +1972,7 @@ export class GameEngine {
       this.screenShake = Math.max(this.screenShake, 12);
       this.spawnRubble(drone.x, drone.y, '#64748b', 16);
       this.spawnHitParticles(drone.x, drone.y, '#f59e0b', 16);
+      this.progressQuest('drone_hunter', 1);
       this.damageNumbers.push({
         id: Math.random().toString(),
         text: '💥 ¡DRON DESTRUIDO! (+100)',
@@ -1212,57 +2014,104 @@ export class GameEngine {
       return;
     }
 
+    const questMult = this.getDamageMultiplier('boss', attackType);
+    const modifiedBaseDmg = Math.round(baseDmg * questMult);
+
     // Prompt: "reduce el daño del rayo verde de catvalentina y que con SOLO ese ataque no sea capaz de asestar un black flash"
     const canBlackFlash = attackType !== 'green_beam';
     const { damage, isBlackFlash } = canBlackFlash
-      ? this.rollBlackFlash(baseDmg, hitX, hitY)
-      : { damage: Math.round(baseDmg), isBlackFlash: false };
+      ? this.rollBlackFlash(modifiedBaseDmg, hitX, hitY)
+      : { damage: Math.round(modifiedBaseDmg), isBlackFlash: false };
 
     this.boss.hp = Math.max(0, this.boss.hp - damage);
     this.stats.nanovalenDamageDealt += damage;
     this.stats.totalAttacksLanded++;
     this.stats.score += damage * 2;
+    this.progressQuest('nanovalen_overload', damage);
 
     if (!isBlackFlash) {
+      const isEmpowered = questMult > 1.05;
       this.damageNumbers.push({
         id: Math.random().toString(),
-        text: `-${damage}`,
+        text: isEmpowered ? `-${damage} ⚡` : `-${damage}`,
         x: hitX,
         y: hitY - 10,
         vy: -1.4,
-        color: '#ff4466',
+        color: isEmpowered ? '#fbbf24' : '#ff4466',
         isBlackFlash: false,
         life: 0.9,
         maxLife: 0.9,
-        scale: 1.1,
+        scale: isEmpowered ? 1.2 : 1.1,
       });
     }
 
     this.spawnHitParticles(hitX, hitY, isBlackFlash ? '#ff003b' : '#ff3b50', 12);
 
+    if (this.isMultiplayer) {
+      multiplayerClient.sendBossHit({
+        damage,
+        attackType,
+        isBlackFlash,
+        hitX,
+        hitY,
+        target: 'nanovalen',
+      });
+    }
+
     // Defeat Nanovalen
     if (this.boss.hp <= 0) {
-      this.triggerVictory();
+      unlockAchievement('defeat_nanovalen');
+      this.damageNumbers.push({
+        id: Math.random().toString(),
+        text: '💥 ¡NANOVALEN HA SIDO DERROTADO! 💥',
+        x: this.boss.x,
+        y: this.boss.y - 40,
+        vy: -1.6,
+        color: '#38bdf8',
+        isBlackFlash: true,
+        life: 3.5,
+        maxLife: 3.5,
+        scale: 1.5,
+      });
+      soundManager.playVictory();
+      this.spawnRubble(this.boss.x, this.boss.y, '#f43f5e', 45);
+      this.spawnRubble(this.boss.x, this.boss.y, '#38bdf8', 35);
+
+      if (this.isMultiplayer) {
+        multiplayerClient.sendStageChange('distorted', 0);
+      }
+      setTimeout(() => {
+        this.startStage('distorted');
+      }, 1500);
+      return;
     }
   }
 
   // --- Transitions ---
 
   private triggerCityToSpaceTransition() {
+    unlockAchievement('complete_level_1');
     this.stage = 'transition';
     this.transitionTimer = 3.0;
     this.obstacles = [];
     this.projectiles = [];
     soundManager.playExplosion();
+    if (this.isMultiplayer && this.isHostPlayer()) {
+      multiplayerClient.sendStageChange('transition', 100);
+    }
   }
 
   private triggerSpaceToBossTransition() {
+    unlockAchievement('complete_level_2');
     this.stage = 'boss_intro';
     this.bossIntroTimer = 3.2;
     this.obstacles = [];
     this.projectiles = [];
     soundManager.stopMusic();
     soundManager.playLaserWarning();
+    if (this.isMultiplayer && this.isHostPlayer()) {
+      multiplayerClient.sendStageChange('boss_intro', 100);
+    }
   }
 
   private initBoss() {
@@ -1300,19 +2149,37 @@ export class GameEngine {
     this.drones = [];
   }
 
-  private triggerVictory(isSantiscat: boolean = false) {
+  public triggerVictory(isSantiscat: boolean = false) {
     this.stage = 'victory';
     soundManager.stopMusic();
     soundManager.playVictory();
-    this.screenShake = 24;
+    this.screenShake = 35;
 
     if (isSantiscat) {
+      unlockAchievement('defeat_santiscat');
+      this.lastBattleStage = 'santiscat_boss_universe';
       this.santiscatWins = (this.santiscatWins || 0) + 1;
       this.stats.santiscatWins = this.santiscatWins;
       if (this.santiscat) {
-        this.spawnRubble(this.santiscat.x, this.santiscat.y, '#a855f7', 45);
-        this.spawnRubble(this.santiscat.x, this.santiscat.y, '#f59e0b', 35);
-        this.spawnHitParticles(this.santiscat.x, this.santiscat.y, '#38bdf8', 40);
+        this.santiscat.hp = 0;
+        this.spawnRubble(this.santiscat.x, this.santiscat.y, '#a855f7', 60);
+        this.spawnRubble(this.santiscat.x, this.santiscat.y, '#f59e0b', 50);
+        this.spawnHitParticles(this.santiscat.x, this.santiscat.y, '#38bdf8', 50);
+        this.spawnHitParticles(this.santiscat.x, this.santiscat.y, '#ffffff', 60);
+        this.spawnHitParticles(this.santiscat.x, this.santiscat.y, '#ec4899', 40);
+
+        // Cancel all ongoing attacks, summons, domains, and projectiles
+        this.santiscat.jujutsuSummons.forEach(sm => sm.active = false);
+        this.santiscat.shrine.active = false;
+        this.santiscat.shrine.chanting = false;
+        this.santiscat.gojoTechniques.blue.active = false;
+        this.santiscat.gojoTechniques.red.active = false;
+        this.santiscat.gojoTechniques.purple.active = false;
+        this.santiscat.rainbowBlast.active = false;
+        this.santiscat.blackHole.active = false;
+        this.santiscat.galaxies = [];
+        this.santiscat.giantStars = [];
+        this.santiscat.supernovas = [];
       }
     } else {
       const prevWins = this.nanovalenWins;
@@ -1368,7 +2235,15 @@ export class GameEngine {
     }
   }
 
+  public rematchSantiscat() {
+    this.stats.deathReason = undefined;
+    this.startStage('santiscat_boss');
+  }
+
   private triggerGameOver() {
+    if (this.stage !== 'gameover' && this.stage !== 'cinematic_earth_destruction') {
+      this.lastBattleStage = this.stage;
+    }
     this.stage = 'gameover';
     soundManager.stopGammaSound();
     soundManager.stopMusic();
@@ -1419,6 +2294,14 @@ export class GameEngine {
       if (c.timer >= c.maxDuration) {
         this.triggerGameOver();
       }
+      return;
+    }
+
+    // Cinematic: Santiscat Final Defeat (Super bright light, 12 souls, WebGL implosion, giant supernova explosion)
+    if (this.stage === 'cinematic_santiscat_defeat' && this.santiscatDefeatCinematic) {
+      this.updateSantiscatDefeatCinematic(delta);
+      this.updateParticles(delta);
+      this.updateDamageNumbers(delta);
       return;
     }
 
@@ -1489,19 +2372,52 @@ export class GameEngine {
       this.updateDrones(delta);
     }
 
-    // Level 4 Stages updates
-    if (this.stage === 'distorted') {
-      this.updateDistorted(delta);
-    } else if (this.stage === 'rhythm_summon') {
-      this.updateRhythmGame(delta);
-    } else if (this.stage === 'santiscat_boss') {
-      this.updateSantiscat(delta);
+    // Level 4 Stages updates (Frozen during Tina's Time Stop across all levels!)
+    if (!this.player.timeStopActive) {
+      if (this.stage === 'distorted') {
+        this.updateDistorted(delta);
+      } else if (this.stage === 'rhythm_summon') {
+        this.updateRhythmGame(delta);
+      } else if (
+        this.stage === 'santiscat_boss' ||
+        this.stage === 'santiscat_boss_wormhole' ||
+        this.stage === 'santiscat_boss_universe'
+      ) {
+        this.updateSantiscat(delta);
+      }
     }
 
     // Update Effects
     this.updateBlackFlashStrikes(delta);
     this.updateParticles(delta);
     this.updateDamageNumbers(delta);
+
+    // Multiplayer State Broadcast (~30Hz)
+    if (this.isMultiplayer) {
+      this.netSyncTimer += delta;
+      if (this.netSyncTimer >= 0.033) {
+        this.netSyncTimer = 0;
+        multiplayerClient.sendPlayerUpdate({
+          x: this.player.x,
+          y: this.player.y,
+          vx: this.player.vx,
+          vy: this.player.vy,
+          facing: this.player.facing,
+          hp: this.player.hp,
+          maxHp: this.player.maxHp,
+          shieldActive: this.player.shieldActive,
+          shieldColor: this.player.shieldColor || '#10b981',
+          eyeState: this.player.eyeState,
+          holdingShield: Boolean(this.player.holdingShield || this.keys['keyk'] || this.keys['shiftleft'] || this.keys['shiftright'] || this.keys['keyc']),
+          greenBeamCharging: this.player.greenBeamCharging,
+          greenBeamFiring: this.player.greenBeamFiring,
+          timeStopActive: this.player.timeStopActive,
+          name: multiplayerClient.currentRoom?.players[this.myPlayerId]?.name || 'Jugador',
+          skin: this.player.skin,
+          isAlive: !this.isSpectating && this.player.hp > 0,
+        });
+      }
+    }
   }
 
   private updatePlayer(delta: number) {
@@ -1541,15 +2457,25 @@ export class GameEngine {
         this.screenShake = 24;
       }
     } else {
-      // Normal Keyboard Movement
+      // Normal Keyboard & Touch Joystick Movement
       let dx = 0;
       let dy = 0;
       if (this.keys['keyw'] || this.keys['arrowup']) dy -= 1;
       if (this.keys['keys'] || this.keys['arrowdown']) dy += 1;
-      if (this.keys['keya'] || this.keys['arrowleft']) dx -= 1;
-      if (this.keys['keyd'] || this.keys['arrowright']) dx += 1;
+      if (this.keys['keya'] || this.keys['arrowleft']) {
+        dx -= 1;
+        p.facing = -1;
+      }
+      if (this.keys['keyd'] || this.keys['arrowright']) {
+        dx += 1;
+        p.facing = 1;
+      }
 
-      if (dx !== 0 && dy !== 0) {
+      // Add touch joystick direction (if active)
+      if (this.touchDx !== 0 || this.touchDy !== 0) {
+        dx = this.touchDx;
+        dy = this.touchDy;
+      } else if (dx !== 0 && dy !== 0) {
         dx *= 0.7071;
         dy *= 0.7071;
       }
@@ -1564,10 +2490,13 @@ export class GameEngine {
       }
     }
 
-    p.x += p.vx;
-    p.y += p.vy;
+    // Dead players in spectator mode don't move physical hitbox
+    if (!this.isSpectating) {
+      p.x += p.vx;
+      p.y += p.vy;
+    }
 
-    // Continuous Green Beam Firing damage
+    // Continuous Green Beam Firing damage in facing direction
     if (p.greenBeamFiring) {
       p.greenBeamFiringTimer -= delta;
       this.screenShake = Math.max(this.screenShake, 14);
@@ -1576,21 +2505,31 @@ export class GameEngine {
       const beamHalfHeight = 36;
 
       this.obstacles.forEach(obs => {
-        if (obs.x > p.x && Math.abs(beamY - (obs.y + obs.height / 2)) < obs.height / 2 + beamHalfHeight) {
+        const inBeam = p.facing === 1 ? obs.x > p.x : obs.x < p.x;
+        if (inBeam && Math.abs(beamY - (obs.y + obs.height / 2)) < obs.height / 2 + beamHalfHeight) {
           this.applyDamageToObstacle(obs, 140 * delta, 'green_beam', obs.x + 10, beamY);
         }
       });
 
       // Prompt: "reduce el daño del rayo verde de catvalentina"
       this.drones.forEach(d => {
-        if (d.x > p.x && Math.abs(beamY - d.y) < d.size + beamHalfHeight) {
+        const inBeam = p.facing === 1 ? d.x > p.x : d.x < p.x;
+        if (inBeam && Math.abs(beamY - d.y) < d.size + beamHalfHeight) {
           this.damageDrone(d, 140 * delta, d.x, beamY);
         }
       });
 
       if (this.boss && this.stage === 'boss') {
-        if (this.boss.x > p.x && Math.abs(beamY - this.boss.y) < this.boss.height / 2 + beamHalfHeight) {
+        const inBeam = p.facing === 1 ? this.boss.x > p.x : this.boss.x < p.x;
+        if (inBeam && Math.abs(beamY - this.boss.y) < this.boss.height / 2 + beamHalfHeight) {
           this.applyDamageToBoss(130 * delta, 'green_beam', this.boss.x, beamY, true);
+        }
+      }
+
+      if (this.santiscat && (this.stage === 'santiscat_boss' || this.stage === 'santiscat_boss_wormhole' || this.stage === 'santiscat_boss_universe')) {
+        const inBeam = p.facing === 1 ? this.santiscat.x > p.x : this.santiscat.x < p.x;
+        if (inBeam && Math.abs(beamY - this.santiscat.y) < this.santiscat.height / 2 + beamHalfHeight) {
+          this.applyDamageToSantiscat(140 * delta, 'green_beam', this.santiscat.x, beamY);
         }
       }
 
@@ -1649,7 +2588,7 @@ export class GameEngine {
 
     // Clamp inside arena / world
     const margin = 40;
-    const isLevel4 = this.stage === 'distorted' || this.stage === 'rhythm_summon' || this.stage === 'santiscat_boss';
+    const isLevel4 = this.stage === 'distorted' || this.stage === 'rhythm_summon' || this.stage === 'santiscat_boss' || this.stage === 'santiscat_boss_wormhole' || this.stage === 'santiscat_boss_universe';
     const boundX = isLevel4 ? this.camera.worldWidth - margin : this.width - margin;
     const boundY = isLevel4 ? this.camera.worldHeight - margin : this.height - margin;
     if (p.x < margin) p.x = margin;
@@ -1689,14 +2628,24 @@ export class GameEngine {
     }
 
     // Shield duration and cooldown
-    if (p.shieldActive) {
-      p.shieldTimer -= delta;
-      if (p.shieldTimer <= 0) {
-        p.shieldActive = false;
+    const isDomainActive = Boolean(this.santiscat?.shrine?.active);
+    const isHoldingShieldKey = Boolean(p.holdingShield || this.keys['keyk'] || this.keys['shiftleft'] || this.keys['shiftright'] || this.keys['keyc']);
+
+    if (isDomainActive && isHoldingShieldKey) {
+      // During Malevolent Shrine, holding K keeps shield active to withstand the thousands of cuts!
+      p.shieldActive = true;
+      p.shieldTimer = p.shieldMaxDuration;
+      p.shieldCooldown = 0;
+    } else {
+      if (p.shieldActive) {
+        p.shieldTimer -= delta;
+        if (p.shieldTimer <= 0) {
+          p.shieldActive = false;
+        }
       }
-    }
-    if (p.shieldCooldown > 0) {
-      p.shieldCooldown = Math.max(0, p.shieldCooldown - delta);
+      if (p.shieldCooldown > 0) {
+        p.shieldCooldown = Math.max(0, p.shieldCooldown - delta);
+      }
     }
 
     // Invulnerability timer
@@ -1705,6 +2654,20 @@ export class GameEngine {
       if (p.invulnerableTimer <= 0) {
         p.isInvulnerable = false;
         p.eyeState = 'normal';
+      }
+    }
+
+    // Survivor Quest Tracker: Maintain >= 40% HP in boss battles
+    const isBossStage =
+      this.stage === 'boss' ||
+      this.stage === 'santiscat_boss' ||
+      this.stage === 'santiscat_boss_wormhole' ||
+      this.stage === 'santiscat_boss_universe';
+    if (isBossStage && !this.isSpectating && p.hp >= p.maxHp * 0.4) {
+      this.survivorSecondTimer += delta;
+      if (this.survivorSecondTimer >= 1.0) {
+        this.survivorSecondTimer = 0;
+        this.progressQuest('survivor_elite', 1);
       }
     }
   }
@@ -1770,9 +2733,23 @@ export class GameEngine {
   }
 
   public takePlayerDamage(amount: number, source: 'meteor' | 'laser' | 'gamma' | 'collision' = 'collision') {
+    // Dead or spectating players cannot take any damage!
+    if (
+      this.isSpectating ||
+      this.player.hp <= 0 ||
+      this.stage === 'gameover' ||
+      this.stage === 'victory' ||
+      this.stage === 'cinematic_earth_destruction' ||
+      this.godMode ||
+      this.player.isInvulnerable
+    ) {
+      return;
+    }
+
     if (this.player.shieldActive) {
       // Green shield absorbs all incoming damage!
       soundManager.playShieldAbsorb();
+      this.progressQuest('shield_guardian', 1);
       this.damageNumbers.push({
         id: Math.random().toString(),
         text: '¡BLOQUEADO!',
@@ -1787,8 +2764,6 @@ export class GameEngine {
       });
       return;
     }
-
-    if (this.player.isInvulnerable || this.godMode) return;
 
     // Check Nanovalen's 1% Black Flash on boss attacks
     let finalAmount = amount;
@@ -1818,6 +2793,23 @@ export class GameEngine {
     });
 
     if (this.player.hp <= 0) {
+      // Phase 2.5: ONLY in this stage, player can refuse to die Undertale style!
+      if (this.stage === 'santiscat_boss_universe' || (this.santiscat && this.santiscat.bossPhase === 2.5)) {
+        this.triggerRefusedToDie();
+        return;
+      }
+
+      // Multiplayer spectator mode: if in multiplayer, fall into spectator mode to follow active teammates!
+      if (this.isMultiplayer) {
+        multiplayerClient.sendPlayerDied();
+        this.isSpectating = true;
+        this.spectateNext();
+        soundManager.stopGammaSound();
+        soundManager.stopMusic();
+        soundManager.playExplosion();
+        return;
+      }
+
       // Prompt: "que si mueres en el estallido de rayos gamma haya una cinematica antes de la pantalla de gameover que sea la tierra siendo afectada y destruida por los estallidos"
       const inGammaAttack = source === 'gamma' || (this.boss && (this.boss.currentAttack === 'gamma_ray_charge' || this.boss.currentAttack === 'gamma_ray_burst'));
       if (inGammaAttack) {
@@ -1942,15 +2934,18 @@ export class GameEngine {
 
       p.duration += delta;
 
-      // Homing behavior for magic orbs and energy blades
+      // Homing behavior for magic orbs and energy blades (Marta & Fermin - works in all stages including Santiscat)
       if (p.type === 'player_magic_orb' || p.type === 'player_energy_blade') {
-        let targetX = this.width + 100;
+        let targetX = p.x + (this.player.facing * 500);
         let targetY = p.y;
-        if (this.boss && this.stage === 'boss') {
+        if (this.santiscat && (this.stage === 'santiscat_boss' || this.stage === 'santiscat_boss_wormhole' || this.stage === 'santiscat_boss_universe')) {
+          targetX = this.santiscat.x;
+          targetY = this.santiscat.y;
+        } else if (this.boss && this.stage === 'boss') {
           targetX = this.boss.x;
           targetY = this.boss.y;
         } else if (this.obstacles.length > 0) {
-          const fwd = this.obstacles.filter(o => o.x > p.x);
+          const fwd = this.obstacles.filter(o => this.player.facing === 1 ? o.x > p.x : o.x < p.x);
           if (fwd.length > 0) {
             targetX = fwd[0].x + fwd[0].width / 2;
             targetY = fwd[0].y + fwd[0].height / 2;
@@ -1958,35 +2953,85 @@ export class GameEngine {
         }
         const ang = Math.atan2(targetY - p.y, targetX - p.x);
         const curAng = Math.atan2(p.vy, p.vx);
-        const speed = Math.hypot(p.vx, p.vy) || 14;
-        const newAng = curAng + (ang - curAng) * 0.12;
+        const speed = Math.hypot(p.vx, p.vy) || 16;
+        const newAng = curAng + (ang - curAng) * 0.14;
         p.vx = Math.cos(newAng) * speed;
         p.vy = Math.sin(newAng) * speed;
       }
 
-      // Special Anvil gravity & slam
+      // Special Anvil gravity & slam (Fermin - Colossal anvil damages Nanovalen, Santiscat, summons, obstacles in all levels)
       if (p.type === 'player_energy_anvil') {
         p.y += p.vy * delta * 60;
-        const groundY = this.boss && this.stage === 'boss' ? this.boss.y : this.height * 0.65;
+        const groundY = p.targetY !== undefined ? p.targetY : (this.player.y + 40);
+
+        // Mid-air collision check while falling
+        if (this.boss && this.stage === 'boss') {
+          if (Math.hypot(p.x - this.boss.x, p.y - this.boss.y) < this.boss.width / 2 + p.radius) {
+            this.applyDamageToBoss(p.damage * 0.75, 'energy_anvil', p.x, p.y, true);
+          }
+        }
+        if (this.santiscat && (this.stage === 'santiscat_boss' || this.stage === 'santiscat_boss_wormhole' || this.stage === 'santiscat_boss_universe')) {
+          if (Math.hypot(p.x - this.santiscat.x, p.y - this.santiscat.y) < this.santiscat.width / 2 + p.radius) {
+            this.applyDamageToSantiscat(p.damage * 0.75, 'energy_anvil', p.x, p.y);
+          }
+          if (this.santiscat.jujutsuSummons) {
+            this.santiscat.jujutsuSummons.forEach(sm => {
+              if (sm.active && Math.hypot(p.x - sm.x, p.y - sm.y) < sm.width / 2 + p.radius) {
+                this.applyDamageToSummon(sm, p.damage * 0.75, 'energy_anvil', p.x, p.y);
+              }
+            });
+          }
+        }
+
         if (p.y >= groundY) {
           soundManager.playEnergyAnvil();
-          this.screenShake = 22;
-          this.spawnHitParticles(p.x, p.y, '#facc15', 24);
-          this.spawnRubble(p.x, p.y, '#ca8a04', 16);
+          this.screenShake = 32;
+          this.spawnHitParticles(p.x, groundY, '#facc15', 36);
+          this.spawnHitParticles(p.x, groundY, '#ffffff', 25);
+          this.spawnRubble(p.x, groundY, '#ca8a04', 30);
 
+          const blastRadius = 240;
           if (this.boss && this.stage === 'boss') {
-            this.applyDamageToBoss(p.damage, 'energy_anvil', p.x, p.y, true);
+            if (Math.hypot(this.boss.x - p.x, this.boss.y - groundY) < blastRadius) {
+              this.applyDamageToBoss(p.damage, 'energy_anvil', p.x, groundY, true);
+            }
+          }
+          if (this.santiscat && (this.stage === 'santiscat_boss' || this.stage === 'santiscat_boss_wormhole' || this.stage === 'santiscat_boss_universe')) {
+            if (Math.hypot(this.santiscat.x - p.x, this.santiscat.y - groundY) < blastRadius) {
+              this.applyDamageToSantiscat(p.damage, 'energy_anvil', p.x, groundY);
+            }
+          }
+          if (this.santiscat?.jujutsuSummons) {
+            this.santiscat.jujutsuSummons.forEach(sm => {
+              if (sm.active && Math.hypot(sm.x - p.x, sm.y - groundY) < blastRadius) {
+                this.applyDamageToSummon(sm, p.damage, 'energy_anvil', p.x, groundY);
+              }
+            });
           }
           this.obstacles.forEach(obs => {
-            if (Math.hypot(obs.x + obs.width / 2 - p.x, obs.y + obs.height / 2 - p.y) < 160) {
-              this.applyDamageToObstacle(obs, p.damage, 'energy_anvil', p.x, p.y);
+            if (Math.hypot(obs.x + obs.width / 2 - p.x, obs.y + obs.height / 2 - groundY) < blastRadius) {
+              this.applyDamageToObstacle(obs, p.damage, 'energy_anvil', p.x, groundY);
             }
           });
           this.drones.forEach(d => {
-            if (Math.hypot(d.x - p.x, d.y - p.y) < 160) {
+            if (Math.hypot(d.x - p.x, d.y - groundY) < blastRadius) {
               this.damageDrone(d, p.damage, d.x, d.y);
             }
           });
+
+          this.damageNumbers.push({
+            id: Math.random().toString(),
+            text: '⚡ ¡IMPACTO DE YUNQUE CÓSMICO! ⚡',
+            x: p.x,
+            y: groundY - 45,
+            vy: -1.8,
+            color: '#facc15',
+            isBlackFlash: true,
+            life: 1.3,
+            maxLife: 1.3,
+            scale: 1.4,
+          });
+
           p.duration = p.maxDuration;
           return;
         }
@@ -2041,12 +3086,25 @@ export class GameEngine {
         }
 
         // Check collision with Santiscat Boss in Level 4
-        if (this.santiscat && this.stage === 'santiscat_boss') {
+        if (this.santiscat && (this.stage === 'santiscat_boss' || this.stage === 'santiscat_boss_wormhole' || this.stage === 'santiscat_boss_universe')) {
           const sDist = Math.hypot(p.x - this.santiscat.x, p.y - this.santiscat.y);
           if (sDist < this.santiscat.width / 2 + p.radius) {
             this.applyDamageToSantiscat(p.damage, p.type.replace('player_', '') as AttackType, p.x, p.y);
             if (p.type !== 'player_light_laser') {
               p.duration = p.maxDuration;
+            }
+          }
+
+          // Check collision with Jujutsu Summons
+          if (this.santiscat.jujutsuSummons) {
+            for (const sm of this.santiscat.jujutsuSummons) {
+              if (sm.active && Math.hypot(p.x - sm.x, p.y - sm.y) < sm.width / 2 + p.radius) {
+                this.applyDamageToSummon(sm, p.damage, p.type.replace('player_', '') as AttackType, p.x, p.y);
+                if (p.type !== 'player_light_laser') {
+                  p.duration = p.maxDuration;
+                }
+                break;
+              }
             }
           }
         }
@@ -2097,13 +3155,15 @@ export class GameEngine {
       }
     });
 
-    // Remove expired
-    const maxBoundX = (this.stage === 'distorted' || this.stage === 'rhythm_summon' || this.stage === 'santiscat_boss')
-      ? this.camera.worldWidth + 150
-      : this.width + 100;
-    const maxBoundY = (this.stage === 'distorted' || this.stage === 'rhythm_summon' || this.stage === 'santiscat_boss')
-      ? this.camera.worldHeight + 150
-      : this.height + 100;
+    // Remove expired (Supports large world in all Level 4 stages: distorted, rhythm, boss, wormhole, alternate universe)
+    const isLevel4 =
+      this.stage === 'distorted' ||
+      this.stage === 'rhythm_summon' ||
+      this.stage === 'santiscat_boss' ||
+      this.stage === 'santiscat_boss_wormhole' ||
+      this.stage === 'santiscat_boss_universe';
+    const maxBoundX = isLevel4 ? this.camera.worldWidth + 150 : this.width + 100;
+    const maxBoundY = isLevel4 ? this.camera.worldHeight + 150 : this.height + 100;
     this.projectiles = this.projectiles.filter(p => p.duration < p.maxDuration && p.x > -150 && p.x < maxBoundX && p.y > -150 && p.y < maxBoundY);
   }
 
@@ -2201,7 +3261,9 @@ export class GameEngine {
     if (b.currentAttack === 'idle') {
       b.attackCooldown -= delta;
       if (b.attackCooldown <= 0) {
-        this.selectBossAttack(hpRatio);
+        if (!this.isMultiplayer || this.isHostPlayer()) {
+          this.selectBossAttack(hpRatio);
+        }
       }
     } else {
       this.executeBossAttack(delta);
@@ -2231,6 +3293,10 @@ export class GameEngine {
     const chosen = options[Math.floor(Math.random() * options.length)];
     b.currentAttack = chosen;
     b.attackTimer = 0;
+
+    if (this.isMultiplayer && this.isHostPlayer()) {
+      multiplayerClient.sendBossAttack('nanovalen', chosen, { laserY: this.player.y });
+    }
 
     if (chosen === 'laser_warning') {
       // Prompt: "lanzar lasers con un aviso previo de 1.5 segundo"
@@ -2570,14 +3636,23 @@ export class GameEngine {
       scale: 1.5,
     });
 
-    if (!this.godMode) {
+    if (!this.godMode && !this.isSpectating && this.player.hp > 0) {
       this.player.hp = Math.max(0, this.player.hp - critDamage);
       this.player.isInvulnerable = true;
       this.player.invulnerableTimer = 1.0;
       this.player.eyeState = 'hurt';
 
       if (this.player.hp <= 0) {
-        this.triggerGameOver();
+        if (this.isMultiplayer) {
+          multiplayerClient.sendPlayerDied();
+          this.isSpectating = true;
+          this.spectateNext();
+          soundManager.stopGammaSound();
+          soundManager.stopMusic();
+          soundManager.playExplosion();
+        } else {
+          this.triggerGameOver();
+        }
       }
     }
   }
@@ -2686,6 +3761,10 @@ export class GameEngine {
     b.attackTimer = 0;
     b.gammaChargeProgress = 0;
     soundManager.playGammaCharge();
+
+    if (this.isMultiplayer && this.isHostPlayer()) {
+      multiplayerClient.sendBossAttack('nanovalen', 'gamma_ray_charge', {});
+    }
 
     // Prompt: "hasta que sean destruidos por el jugador o nanovalen active el estallido de rayos gamma, los drones tendran 300 HP"
     if (this.drones.length > 0) {
@@ -2797,10 +3876,22 @@ export class GameEngine {
   // =========================================================================
 
   private updateCamera(delta: number) {
-    const isLevel4 = this.stage === 'distorted' || this.stage === 'rhythm_summon' || this.stage === 'santiscat_boss';
+    const isLevel4 = this.stage === 'distorted' || this.stage === 'rhythm_summon' || this.stage === 'santiscat_boss' || this.stage === 'santiscat_boss_wormhole' || this.stage === 'santiscat_boss_universe';
+
+    let focusX = this.player.x;
+    let focusY = this.player.y;
+
+    if (this.isSpectating && this.spectatingTargetId) {
+      const target = this.remotePlayers.get(this.spectatingTargetId);
+      if (target && target.isAlive) {
+        focusX = target.x;
+        focusY = target.y;
+      }
+    }
+
     if (isLevel4) {
-      const targetCamX = this.player.x - this.camera.viewportWidth / 2;
-      const targetCamY = this.player.y - this.camera.viewportHeight / 2;
+      const targetCamX = focusX - this.camera.viewportWidth / 2;
+      const targetCamY = focusY - this.camera.viewportHeight / 2;
       this.camera.x += (targetCamX - this.camera.x) * 0.12;
       this.camera.y += (targetCamY - this.camera.y) * 0.12;
       const maxCamX = Math.max(0, this.camera.worldWidth - this.camera.viewportWidth);
@@ -2931,6 +4022,9 @@ export class GameEngine {
     // Proximity to Ancient Altar
     const distToAltar = Math.hypot(this.player.x - 1600, this.player.y - 1200);
     if (distToAltar < 80) {
+      if (this.isMultiplayer && this.isSantiscatSummoning) {
+        return;
+      }
       this.startStage('rhythm_summon');
     }
   }
@@ -3077,6 +4171,12 @@ export class GameEngine {
   }
 
   public triggerSantiscatSummonSequence() {
+    this.isSantiscatSummoning = true;
+    if (this.isMultiplayer) {
+      const myName = multiplayerClient.currentRoom?.players[this.myPlayerId]?.name || 'Jugador';
+      multiplayerClient.sendSummonSantiscat(this.myPlayerId, myName);
+      multiplayerClient.sendStageChange('santiscat_boss', 0);
+    }
     soundManager.playSantiscatSummon();
     this.screenShake = 34;
     this.spawnHitParticles(1600, 1200, '#a855f7', 45);
@@ -3119,6 +4219,25 @@ export class GameEngine {
       });
     }
 
+    // Restore player status for the Santiscat boss fight
+    this.player.hp = this.player.maxHp;
+    this.player.isInvulnerable = false;
+    this.player.invulnerableTimer = 0;
+    this.player.shieldActive = false;
+    this.player.shieldCooldown = 0;
+    this.player.punchCooldown = 0;
+    this.player.fireballCooldown = 0;
+    this.player.lightningCooldown = 0;
+    this.player.powerBurstCooldown = 0;
+    this.player.healsRemaining = this.player.maxHeals;
+    this.player.eyeState = 'normal';
+    this.player.x = 1600;
+    this.player.y = 1500;
+    this.player.vx = 0;
+    this.player.vy = 0;
+    this.camera.x = 1600 - this.camera.viewportWidth / 2;
+    this.camera.y = 1500 - this.camera.viewportHeight / 2;
+
     this.santiscat = {
       x: 1600,
       y: 950,
@@ -3126,8 +4245,8 @@ export class GameEngine {
       vy: 0,
       width: 140,
       height: 140,
-      hp: 4800,
-      maxHp: 4800,
+      hp: 15000,
+      maxHp: 15000,
       shieldActive: false,
       shieldTimer: 0,
       currentAttack: 'idle',
@@ -3155,12 +4274,167 @@ export class GameEngine {
       eyeState: 'glowing',
       facing: 1,
       summonExplosionTimer: 1.8,
+      jujutsuSummons: [
+        {
+          id: 'sukunacat',
+          name: 'Sukunacat (Rey de las Maldiciones)',
+          x: 1350,
+          y: 1100,
+          vx: 0,
+          vy: 0,
+          width: 95,
+          height: 95,
+          hp: 12000,
+          maxHp: 12000,
+          facing: 1,
+          active: false,
+          state: 'idle',
+          timer: 0,
+          cooldownTimer: 1.2,
+          slashes: [],
+        },
+        {
+          id: 'gojocat',
+          name: 'Gojocat (El Más Fuerte)',
+          x: 1850,
+          y: 1100,
+          vx: 0,
+          vy: 0,
+          width: 95,
+          height: 95,
+          hp: 12000,
+          maxHp: 12000,
+          facing: -1,
+          active: false,
+          state: 'idle',
+          timer: 0,
+          cooldownTimer: 3.5,
+          slashes: [],
+        },
+      ],
+      shrine: {
+        active: false,
+        chanting: false,
+        chantTimer: 0,
+        timer: 0,
+        maxDuration: 7.2,
+        shrineX: 1600,
+        shrineY: 960,
+        redIntensity: 0,
+        cuts: [],
+        damageTickTimer: 0,
+      },
+      gojoTechniques: {
+        blue: {
+          active: false,
+          x: 1600,
+          y: 1100,
+          radius: 40,
+          suctionRadius: 420,
+          timer: 0,
+          maxDuration: 5.5,
+          absorbedDebris: [],
+        },
+        red: {
+          active: false,
+          x: 1600,
+          y: 1100,
+          radius: 20,
+          maxRadius: 360,
+          timer: 0,
+          maxDuration: 3.2,
+          repelledDebris: [],
+        },
+        purple: {
+          active: false,
+          phase: 'charging',
+          x: 0,
+          y: 0,
+          vx: 0,
+          vy: 0,
+          radius: 95,
+          timer: 0,
+          maxDuration: 5.5,
+          blueOrb: { x: 0, y: 0 },
+          redOrb: { x: 0, y: 0 },
+          fusionProgress: 0,
+          distortionRadius: 220,
+          trail: [],
+        },
+      },
+      // --- FASE 2 & FASE 2.5 INITIALIZATION ---
+      bossPhase: 1,
+      souls: [
+        { id: 'tenacidad', name: 'Tenacidad', trait: 'Tenacidad', image: '/assets/aistudio/Tenacidad_ca49aeec.png', color: '#ec4899', glowColor: '#db2777', angle: 0, distance: 0, targetDistance: 190, scale: 0.9, alpha: 0, absorbed: false },
+        { id: 'integridad', name: 'Integridad', trait: 'Integridad', image: '/assets/aistudio/Integridad_ca808672.png', color: '#1d4ed8', glowColor: '#1e40af', angle: (Math.PI * 2 * 1) / 12, distance: 0, targetDistance: 190, scale: 0.9, alpha: 0, absorbed: false },
+        { id: 'justicia', name: 'Justicia', trait: 'Justicia', image: '/assets/aistudio/Justicia_3626915d.png', color: '#facc15', glowColor: '#eab308', angle: (Math.PI * 2 * 2) / 12, distance: 0, targetDistance: 190, scale: 0.9, alpha: 0, absorbed: false },
+        { id: 'valentia', name: 'Valentía', trait: 'Valentía', image: '/assets/aistudio/Valentia_7a5ea704.png', color: '#f97316', glowColor: '#ea580c', angle: (Math.PI * 2 * 3) / 12, distance: 0, targetDistance: 190, scale: 0.9, alpha: 0, absorbed: false },
+        { id: 'simpatia', name: 'Simpatía', trait: 'Simpatía', image: '/assets/aistudio/Simpatia_1f6b6d79.png', color: '#06b6d4', glowColor: '#0891b2', angle: (Math.PI * 2 * 4) / 12, distance: 0, targetDistance: 190, scale: 0.9, alpha: 0, absorbed: false },
+        { id: 'rectitud', name: 'Rectitud', trait: 'Rectitud', image: '/assets/aistudio/Rectitud_1721dbcd.png', color: '#8b5cf6', glowColor: '#7c3aed', angle: (Math.PI * 2 * 5) / 12, distance: 0, targetDistance: 190, scale: 0.9, alpha: 0, absorbed: false },
+        { id: 'determinacion', name: 'Determinación', trait: 'Determinación', image: '/assets/aistudio/Determinacion_b541db8d.png', color: '#ef4444', glowColor: '#dc2626', angle: (Math.PI * 2 * 6) / 12, distance: 0, targetDistance: 190, scale: 0.9, alpha: 0, absorbed: false },
+        { id: 'paciencia', name: 'Paciencia', trait: 'Paciencia', image: '/assets/aistudio/Paciencia_227b909a.png', color: '#38bdf8', glowColor: '#0284c7', angle: (Math.PI * 2 * 7) / 12, distance: 0, targetDistance: 190, scale: 0.9, alpha: 0, absorbed: false },
+        { id: 'perseverancia', name: 'Perseverancia', trait: 'Perseverancia', image: '/assets/aistudio/Perseverancia_74b3517e.png', color: '#a855f7', glowColor: '#9333ea', angle: (Math.PI * 2 * 8) / 12, distance: 0, targetDistance: 190, scale: 0.9, alpha: 0, absorbed: false },
+        { id: 'amabilidad', name: 'Amabilidad', trait: 'Amabilidad', image: '/assets/aistudio/Amabilidad_2df30abc.png', color: '#22c55e', glowColor: '#16a34a', angle: (Math.PI * 2 * 9) / 12, distance: 0, targetDistance: 190, scale: 0.9, alpha: 0, absorbed: false },
+        { id: 'coraje', name: 'Coraje', trait: 'Coraje', image: '/assets/aistudio/Coraje_e2838b81.png', color: '#eab308', glowColor: '#ca8a04', angle: (Math.PI * 2 * 10) / 12, distance: 0, targetDistance: 190, scale: 0.9, alpha: 0, absorbed: false },
+        { id: 'entendimiento', name: 'Entendimiento', trait: 'Entendimiento', image: '/assets/aistudio/Entendimiento_eb7ff49c.png', color: '#10b981', glowColor: '#059669', angle: (Math.PI * 2 * 11) / 12, distance: 0, targetDistance: 190, scale: 0.9, alpha: 0, absorbed: false },
+      ],
+      soulAbsorbTimer: 0,
+      portalAngle: 0,
+      portalScale: 0,
+      wormholeProgress: 0,
+      wormholeTimer: 0,
+      rainbowBlast: {
+        active: false,
+        timer: 0,
+        chargeDuration: 1.3,
+        fireDuration: 1.8,
+        beamWidth: 260,
+        safeSide: 'bottom',
+        safeY: 1600,
+      },
+      galaxies: [],
+      giantStars: [],
+      supernovas: [],
+      omegaSave: {
+        active: false,
+        hasSave: false,
+        stateText: undefined,
+        textTimer: 0,
+        savedPlayerX: 1600,
+        savedPlayerY: 1500,
+        savedPlayerHp: 100,
+        savedAttack: 'idle',
+        loadTimer: 0,
+      },
+      refusedToDie: {
+        active: false,
+        phase: 'idle',
+        timer: 0,
+        heartX: 1600,
+        heartY: 1500,
+        crackProgress: 0,
+        alpha: 0,
+      },
     };
   }
 
   private updateSantiscat(delta: number) {
-    if (!this.santiscat || this.stage !== 'santiscat_boss') return;
+    if (!this.santiscat || (this.stage !== 'santiscat_boss' && this.stage !== 'santiscat_boss_wormhole' && this.stage !== 'santiscat_boss_universe')) return;
     const s = this.santiscat;
+
+    // Ensure Santiscat dies or transitions immediately when his HP reaches 0!
+    if (s.hp <= 0) {
+      if (s.bossPhase === 1) {
+        if (s.currentAttack !== 'absorbing_souls') {
+          this.startSantiscatPhase2Cinematic();
+        }
+        return;
+      } else {
+        // Phase 2 or Phase 2.5: Santiscat dies completely and triggers victory!
+        this.triggerVictory(true);
+        return;
+      }
+    }
 
     s.floatOffset = Math.sin(this.stats.timeElapsed * 2.5) * 16;
     if (s.summonExplosionTimer && s.summonExplosionTimer > 0) {
@@ -3170,33 +4444,117 @@ export class GameEngine {
     // Direction facing player
     s.facing = this.player.x < s.x ? -1 : 1;
 
-    // Movement: smooth floating around player
-    if (s.currentAttack !== 'black_hole_chase') {
-      const targetX = this.player.x + (s.facing === -1 ? 380 : -380);
-      const targetY = this.player.y - 80;
-      s.x += (targetX - s.x) * 0.025;
-      s.y += (targetY - s.y) * 0.025;
+    // Movement: periodically and smoothly tracks player to stay within close combat range
+    const distToPlayer = Math.hypot(this.player.x - s.x, this.player.y - s.y);
+
+    if (s.currentAttack !== 'black_hole_chase' && s.currentAttack !== 'absorbing_souls' && s.currentAttack !== 'rainbow_blast') {
+      const targetOffset = s.facing === -1 ? 320 : -320;
+      const targetX = this.player.x + targetOffset;
+      const targetY = this.player.y - 70;
+
+      // Dynamic tracking speed based on distance:
+      // If player moves far away (> 420px), Santiscat glides quickly toward the player
+      let followRate = 0.038;
+      if (distToPlayer > 800) {
+        followRate = 0.12; // Fast catch-up
+      } else if (distToPlayer > 480) {
+        followRate = 0.075; // Swift closing distance
+      }
+
+      s.x += (targetX - s.x) * followRate;
+      s.y += (targetY - s.y) * followRate;
+
+      // Keep Santiscat nicely framed within arena boundaries
+      const minX = 140;
+      const maxX = this.camera.worldWidth - 140;
+      const minY = 140;
+      const maxY = this.camera.worldHeight - 140;
+      s.x = Math.max(minX, Math.min(maxX, s.x));
+      s.y = Math.max(minY, Math.min(maxY, s.y));
     }
 
     // Hand punch progress decay
     if (s.leftHand.progress > 0) s.leftHand.progress = Math.max(0, s.leftHand.progress - delta * 3);
     if (s.rightHand.progress > 0) s.rightHand.progress = Math.max(0, s.rightHand.progress - delta * 3);
 
+    // Update Refused to Die animation in Phase 2.5
+    if (s.refusedToDie && s.refusedToDie.active) {
+      s.refusedToDie.timer += delta;
+      if (s.refusedToDie.timer >= 3.2) {
+        s.refusedToDie.active = false;
+        s.refusedToDie.phase = 'idle';
+      }
+    }
+
+    // Update Supernovas explosion shockwaves
+    this.updateSantiscatSupernovas(delta);
+
+    // --- PHASE TRANSITION: ABSORBING 12 SOULS ---
+    if (s.currentAttack === 'absorbing_souls') {
+      this.updateSantiscatAbsorbingSouls(delta);
+      return;
+    }
+
+    // --- PHASE 2: WORMHOLE PROGRESSION ---
+    if (this.stage === 'santiscat_boss_wormhole') {
+      s.wormholeTimer += delta;
+      s.wormholeProgress = Math.min(100, (s.wormholeTimer / 45) * 100);
+
+      // Transition to Phase 2.5 when reaching 100% of wormhole
+      if (s.wormholeProgress >= 100 && s.bossPhase === 2) {
+        this.transitionToPhase25Universe();
+        return;
+      }
+    }
+
     // AI Attack Cycle
     if (s.currentAttack === 'idle') {
       s.attackCooldown -= delta;
       if (s.attackCooldown <= 0) {
-        const attacks: SantiscatAttack[] = [
-          'sun_burst',
-          'oneshot_fireball',
-          'reality_slashes',
-          'sun_burst',
-          'oneshot_fireball',
-          'dimensional_warp',
-        ];
+        if (this.isMultiplayer && !this.isHostPlayer()) {
+          return;
+        }
+        let attacks: SantiscatAttack[] = [];
+        if (s.bossPhase === 1) {
+          attacks = [
+            'summon_jujutsu_cats',
+            'sun_burst',
+            'oneshot_fireball',
+            'reality_slashes',
+            'summon_jujutsu_cats',
+            'sun_burst',
+            'oneshot_fireball',
+            'dimensional_warp',
+          ];
+        } else if (s.bossPhase === 2) {
+          // Wormhole attacks: Giant Rainbow Blast, Spiral Galaxies, Giant Stars / Supernovas, Omega Save/Load, Black Holes
+          attacks = [
+            'rainbow_blast',
+            'spiral_galaxy',
+            'giant_stars',
+            'omega_save_load',
+            'black_hole_chase',
+            'rainbow_blast',
+            'spiral_galaxy',
+            'giant_stars',
+          ];
+        } else {
+          // Phase 2.5: Alternate Universe ultimate cosmic attacks
+          attacks = [
+            'rainbow_blast',
+            'spiral_galaxy',
+            'giant_stars',
+            'omega_save_load',
+            'sun_burst',
+            'reality_slashes',
+            'black_hole_chase',
+          ];
+        }
         const nextAttack = attacks[Math.floor(Math.random() * attacks.length)];
         this.triggerSantiscatAttack(nextAttack);
       }
+    } else if (s.currentAttack === 'summon_jujutsu_cats') {
+      this.updateSantiscatSummonCats(delta);
     } else if (s.currentAttack === 'sun_burst') {
       this.updateSantiscatSun(delta);
     } else if (s.currentAttack === 'compress_black_hole') {
@@ -3209,16 +4567,76 @@ export class GameEngine {
       this.updateSantiscatSlashes(delta);
     } else if (s.currentAttack === 'dimensional_warp') {
       this.updateSantiscatWarp(delta);
+    } else if (s.currentAttack === 'rainbow_blast') {
+      this.updateSantiscatRainbowBlast(delta);
+    } else if (s.currentAttack === 'spiral_galaxy') {
+      this.updateSantiscatGalaxies(delta);
+    } else if (s.currentAttack === 'giant_stars') {
+      this.updateSantiscatGiantStars(delta);
+    } else if (s.currentAttack === 'omega_save_load') {
+      this.updateSantiscatOmegaSaveLoad(delta);
+    }
+
+    // Update Jujutsu Summons, Malevolent Shrine, and Gojo Techniques if in Phase 1
+    if (s.bossPhase === 1) {
+      this.updateJujutsuSummons(delta);
+      this.updateMalevolentShrine(delta);
+      this.updateGojoTechniques(delta);
     }
   }
 
-  private triggerSantiscatAttack(attack: SantiscatAttack) {
+  private triggerSantiscatAttack(attack: SantiscatAttack, broadcast: boolean = true) {
     if (!this.santiscat) return;
     const s = this.santiscat;
     s.currentAttack = attack;
     s.attackTimer = 0;
 
-    if (attack === 'sun_burst') {
+    if (broadcast && this.isMultiplayer && this.isHostPlayer()) {
+      multiplayerClient.sendBossAttack('santiscat', attack, {
+        safeSide: s.rainbowBlast?.safeSide,
+        x: s.x,
+        y: s.y,
+      });
+    }
+
+    if (attack === 'summon_jujutsu_cats') {
+      s.eyeState = 'glowing';
+      s.leftHand.progress = 1.0;
+      s.rightHand.progress = 1.0;
+      soundManager.playSantiscatSummon();
+      this.screenShake = 22;
+      this.spawnHitParticles(s.x, s.y, '#dc2626', 30);
+      this.spawnHitParticles(s.x, s.y, '#38bdf8', 30);
+      this.damageNumbers.push({
+        id: Math.random().toString(),
+        text: '🔥 ¡SANTISCAT INVOCA A SUKUNACAT Y GOJOCAT! 🔥',
+        x: s.x,
+        y: s.y - 75,
+        vy: -1.4,
+        color: '#f43f5e',
+        isBlackFlash: true,
+        life: 2.2,
+        maxLife: 2.2,
+        scale: 1.4,
+      });
+
+      // Activate summons with positioning near player
+      s.jujutsuSummons.forEach(sm => {
+        sm.active = true;
+        sm.maxHp = 12000;
+        sm.hp = sm.maxHp;
+        sm.state = 'idle';
+        sm.timer = 0;
+        sm.cooldownTimer = sm.id === 'sukunacat' ? 0.8 : 3.2; // Staggered: Sukunacat attacks first, Gojocat waits
+        if (sm.id === 'sukunacat') {
+          sm.x = Math.max(250, this.player.x - 320);
+          sm.y = this.player.y - 60;
+        } else {
+          sm.x = Math.min(this.camera.worldWidth - 250, this.player.x + 320);
+          sm.y = this.player.y - 60;
+        }
+      });
+    } else if (attack === 'sun_burst') {
       s.blackHole.active = true;
       s.blackHole.phase = 'sun_charging';
       s.blackHole.x = s.x;
@@ -3248,9 +4666,43 @@ export class GameEngine {
           timer: 0,
           maxTimer: 1.2,
           width: 24,
-          damage: 65,
+          damage: 20, // Non-lethal damage (does not kill automatically)
+          hasHit: false,
         });
       }
+    } else if (attack === 'rainbow_blast') {
+      this.triggerSantiscatRainbowBlast();
+    } else if (attack === 'spiral_galaxy') {
+      this.triggerSantiscatGalaxies();
+    } else if (attack === 'giant_stars') {
+      this.triggerSantiscatGiantStars();
+    } else if (attack === 'omega_save_load') {
+      this.triggerSantiscatOmegaSaveLoad();
+    } else if (attack === 'black_hole_chase') {
+      s.blackHole.active = true;
+      s.blackHole.phase = 'black_hole_active';
+      s.blackHole.x = s.x;
+      s.blackHole.y = s.y - 80;
+      s.blackHole.radius = 48;
+      s.blackHole.timer = 0;
+      s.blackHole.maxDuration = 8.5;
+      s.blackHole.absorbedDebris = [];
+      s.eyeState = 'menacing';
+      soundManager.playBlackHoleCollapse();
+      this.screenShake = 24;
+
+      this.damageNumbers.push({
+        id: Math.random().toString(),
+        text: '🕳️ ¡AGUJERO NEGRO CÓSMICO! ¡ALÉJATE DE SU GRAVEDAD! 🕳️',
+        x: s.x,
+        y: s.y - 85,
+        vy: -1.3,
+        color: '#a855f7',
+        isBlackFlash: true,
+        life: 2.2,
+        maxLife: 2.2,
+        scale: 1.4,
+      });
     }
   }
 
@@ -3363,11 +4815,24 @@ export class GameEngine {
       }
     });
 
-    // Check player contact with event horizon
+    // Prompt: "que el agujero negro de santiscat te mate automaticamente si entras en el"
     if (dist < bh.radius + this.player.width * 0.35) {
-      if (!this.godMode && !this.player.isInvulnerable) {
+      if (!this.godMode && !this.isSpectating && this.player.hp > 0) {
         this.stats.deathReason = 'black_hole';
-        this.takePlayerDamage(65 * delta, 'collision');
+        this.player.hp = 0;
+        this.player.isInvulnerable = true;
+        soundManager.playBlackHoleCollapse();
+        this.screenShake = 32;
+        this.spawnHitParticles(this.player.x, this.player.y, '#000000', 35);
+        this.spawnHitParticles(this.player.x, this.player.y, '#a855f7', 25);
+        if (this.isMultiplayer) {
+          this.isSpectating = true;
+          multiplayerClient.sendPlayerDied();
+          this.spectateNext();
+          return;
+        }
+        this.triggerGameOver();
+        return;
       }
     }
 
@@ -3437,9 +4902,12 @@ export class GameEngine {
           const projY = slash.y1 + t * ldy;
           const distToLine = Math.hypot(px - projX, py - projY);
 
-          if (distToLine < slash.width + this.player.width * 0.4) {
+          if (distToLine < slash.width + this.player.width * 0.4 && !slash.hasHit) {
+            slash.hasHit = true;
             this.stats.deathReason = 'reality_tear';
-            this.takePlayerDamage(slash.damage, 'laser');
+            // Prompt: "haz que los cortes no te maten automaticamente"
+            const safeDamage = Math.min(slash.damage, Math.max(1, this.player.hp - 10));
+            this.takePlayerDamage(safeDamage, 'collision');
           }
         }
         slash.phase = 'slash';
@@ -3467,34 +4935,1827 @@ export class GameEngine {
   }
 
   public applyDamageToSantiscat(baseDmg: number, attackType: AttackType, hitX: number, hitY: number) {
-    if (!this.santiscat || this.stage !== 'santiscat_boss') return;
+    if (!this.santiscat) return;
+    if (this.stage !== 'santiscat_boss' && this.stage !== 'santiscat_boss_wormhole' && this.stage !== 'santiscat_boss_universe') return;
     const s = this.santiscat;
 
-    const { damage, isBlackFlash } = this.rollBlackFlash(baseDmg, hitX, hitY);
+    // During soul absorption transition, Santiscat cannot be damaged
+    if (s.currentAttack === 'absorbing_souls') return;
+
+    const questMult = this.getDamageMultiplier('santiscat', attackType);
+    const modifiedBaseDmg = Math.round(baseDmg * questMult);
+
+    const { damage, isBlackFlash } = this.rollBlackFlash(modifiedBaseDmg, hitX, hitY);
     s.hp = Math.max(0, s.hp - damage);
     this.stats.santiscatDamageDealt = (this.stats.santiscatDamageDealt || 0) + damage;
     this.stats.totalAttacksLanded++;
     this.stats.score += damage * 3;
+    this.progressQuest('santiscat_breaker', damage);
 
     if (!isBlackFlash) {
+      const isEmpowered = questMult > 1.05;
       this.damageNumbers.push({
         id: Math.random().toString(),
-        text: `-${damage}`,
+        text: isEmpowered ? `-${damage} ⚡` : `-${damage}`,
         x: hitX,
         y: hitY - 12,
         vy: -1.4,
-        color: '#f43f5e',
+        color: isEmpowered ? '#fbbf24' : '#f43f5e',
         isBlackFlash: false,
         life: 0.9,
         maxLife: 0.9,
-        scale: 1.15,
+        scale: isEmpowered ? 1.25 : 1.15,
       });
     }
 
     this.spawnHitParticles(hitX, hitY, isBlackFlash ? '#ff003b' : '#c084fc', 12);
 
+    if (this.isMultiplayer) {
+      multiplayerClient.sendBossHit({
+        damage,
+        attackType,
+        isBlackFlash,
+        hitX,
+        hitY,
+        target: 'santiscat',
+      });
+    }
+
     if (s.hp <= 0) {
+      if (s.bossPhase === 1) {
+        this.startSantiscatPhase2Cinematic();
+      } else {
+        // Phase 2 (wormhole) or Phase 2.5 (another universe): Santiscat dies completely!
+        this.startSantiscatDefeatCinematic();
+      }
+    }
+  }
+
+  // =========================================================================
+  // SANTISCAT PHASE 2 (WORMHOLE & 12 HUMAN SOULS) & PHASE 2.5 (ANOTHER UNIVERSE)
+  // =========================================================================
+
+  public startSantiscatPhase2Cinematic() {
+    if (!this.santiscat) return;
+    const s = this.santiscat;
+    s.hp = 1; // Hanging on near death
+    s.currentAttack = 'absorbing_souls';
+    s.attackTimer = 0;
+    s.soulAbsorbTimer = 0;
+    s.portalScale = 0;
+    s.portalAngle = 0;
+
+    // Dismiss any Jujutsu Summons or active domains
+    s.jujutsuSummons.forEach(sm => {
+      sm.active = false;
+      sm.state = 'idle';
+    });
+    s.shrine.active = false;
+    s.shrine.chanting = false;
+    s.gojoTechniques.blue.active = false;
+    s.gojoTechniques.red.active = false;
+    s.gojoTechniques.purple.active = false;
+
+    // Reset 12 human souls to emerge from portal
+    s.souls.forEach((soul, i) => {
+      soul.absorbed = false;
+      soul.alpha = 0;
+      soul.distance = 0;
+      soul.targetDistance = 210;
+      soul.scale = 0.9;
+      soul.angle = (Math.PI * 2 * i) / 12;
+    });
+
+    soundManager.playSoulAbsorption();
+    this.screenShake = 32;
+
+    this.damageNumbers.push({
+      id: Math.random().toString(),
+      text: '🌀 SANTISCAT ABRE UN PORTAL SOMBRÍO E INVOCA 12 ALMAS HUMANAS! 🌀',
+      x: s.x,
+      y: s.y - 95,
+      vy: -1.2,
+      color: '#c084fc',
+      isBlackFlash: true,
+      life: 3.5,
+      maxLife: 3.5,
+      scale: 1.5,
+    });
+  }
+
+  private updateSantiscatAbsorbingSouls(delta: number) {
+    const s = this.santiscat!;
+    s.soulAbsorbTimer += delta;
+    s.portalAngle += delta * 3.0;
+
+    // Center Santiscat for dramatic soul absorption ritual
+    s.x += (1600 - s.x) * 0.04;
+    s.y += (1050 - s.y) * 0.04;
+
+    // Step 1 (0 to 1.8s): Dark shadow portal opens & expands behind Santiscat
+    if (s.soulAbsorbTimer < 1.8) {
+      s.portalScale = Math.min(1.2, s.portalScale + delta * 0.85);
+    }
+
+    // Step 2 (1.0 to 3.8s): The 12 human souls emerge from portal, orbit in ring around Santiscat
+    s.souls.forEach((soul, idx) => {
+      if (s.soulAbsorbTimer > 0.4 + idx * 0.08) {
+        soul.alpha = Math.min(1, soul.alpha + delta * 2.2);
+        soul.distance += (soul.targetDistance - soul.distance) * 0.07;
+        // Faster spinning ring animation
+        const spinSpeed = 1.6 + s.soulAbsorbTimer * 1.1;
+        soul.angle += delta * spinSpeed;
+
+        // Sparkle trail for each soul
+        if (Math.random() < 0.4) {
+          const sx = s.x + Math.cos(soul.angle) * soul.distance;
+          const sy = s.y + Math.sin(soul.angle) * soul.distance;
+          this.particles.push({
+            x: sx,
+            y: sy,
+            vx: (Math.random() - 0.5) * 1.5,
+            vy: (Math.random() - 0.5) * 1.5,
+            size: Math.random() * 4 + 2,
+            color: soul.color,
+            life: 0.35,
+            maxLife: 0.35,
+            alpha: 1,
+            shape: 'spark',
+          });
+        }
+      }
+    });
+
+    // Step 3 (3.8s to 4.8s): The souls converge rapidly into Santiscat's chest and get absorbed!
+    if (s.soulAbsorbTimer >= 3.8 && s.soulAbsorbTimer < 4.8) {
+      s.souls.forEach(soul => {
+        soul.distance = Math.max(0, soul.distance - delta * 460);
+        soul.scale = Math.max(0.2, soul.scale - delta * 0.8);
+        if (soul.distance <= 20) {
+          soul.absorbed = true;
+          soul.alpha = 0;
+        }
+      });
+      this.screenShake = Math.max(this.screenShake, 18);
+    }
+
+    // Step 4 (4.8s Climax): Blinding flash, Santiscat ascends into Phase 2 (99,999 HP) & enters Wormhole!
+    if (s.soulAbsorbTimer >= 4.8) {
+      s.souls.forEach(soul => (soul.absorbed = true));
+      s.hp = 99999;
+      s.maxHp = 99999;
+      s.bossPhase = 2;
+      this.stage = 'santiscat_boss_wormhole';
+      s.wormholeTimer = 0;
+      s.wormholeProgress = 0;
+      s.currentAttack = 'idle';
+      s.attackCooldown = 1.8;
+      soundManager.playMusic('santiscat_phase2');
+
+      this.screenShake = 42;
+      this.spawnHitParticles(s.x, s.y, '#ffffff', 50);
+      this.spawnHitParticles(s.x, s.y, '#ec4899', 30);
+      this.spawnHitParticles(s.x, s.y, '#06b6d4', 30);
+      this.spawnHitParticles(s.x, s.y, '#facc15', 30);
+
+      this.damageNumbers.push({
+        id: Math.random().toString(),
+        text: '⚡ ¡FASE 2: VIAJE POR EL AGUJERO DE GUSANO! (99,999 HP) ⚡',
+        x: s.x,
+        y: s.y - 100,
+        vy: -1.6,
+        color: '#fbbf24',
+        isBlackFlash: true,
+        life: 3.5,
+        maxLife: 3.5,
+        scale: 1.6,
+      });
+    }
+  }
+
+  // --- ATTACK 1: GIANT RAINBOW ENERGY BLAST ---
+  private triggerSantiscatRainbowBlast() {
+    const s = this.santiscat!;
+    s.currentAttack = 'rainbow_blast';
+    s.attackTimer = 0;
+    s.rainbowBlast.active = true;
+    s.rainbowBlast.timer = 0;
+    // Safe corridor: top or bottom of the screen
+    s.rainbowBlast.safeSide = Math.random() < 0.5 ? 'top' : 'bottom';
+    s.rainbowBlast.safeY = s.rainbowBlast.safeSide === 'top' ? this.player.y - 200 : this.player.y + 200;
+    s.eyeState = 'glowing';
+    soundManager.playRainbowBlastCharge();
+
+    this.damageNumbers.push({
+      id: Math.random().toString(),
+      text: '🌈 ¡BLAST DE ENERGÍA ARCOÍRIS GIGANTE! ¡ESQUIVA A LA ZONA SEGURA! 🌈',
+      x: s.x,
+      y: s.y - 80,
+      vy: -1.2,
+      color: '#f43f5e',
+      isBlackFlash: true,
+      life: 2.4,
+      maxLife: 2.4,
+      scale: 1.4,
+    });
+  }
+
+  private updateSantiscatRainbowBlast(delta: number) {
+    const s = this.santiscat!;
+    const rb = s.rainbowBlast;
+    rb.timer += delta;
+
+    // Align blast horizontally with Santiscat across arena
+    const beamCenterY = s.y;
+    const beamHalfWidth = rb.beamWidth / 2;
+
+    if (rb.timer >= rb.chargeDuration && rb.timer - delta < rb.chargeDuration) {
+      soundManager.playRainbowBlastFire();
+      this.screenShake = 35;
+    }
+
+    // Firing active period (chargeDuration to chargeDuration + fireDuration)
+    if (rb.timer >= rb.chargeDuration && rb.timer <= rb.chargeDuration + rb.fireDuration) {
+      this.screenShake = Math.max(this.screenShake, 24);
+
+      // Check collision with player: One-shot if player is inside the giant beam!
+      const playerInBeamY = Math.abs(this.player.y - beamCenterY) < beamHalfWidth + this.player.height * 0.4;
+      const playerInSafeCorridor =
+        rb.safeSide === 'top' ? this.player.y < beamCenterY - beamHalfWidth : this.player.y > beamCenterY + beamHalfWidth;
+
+      if (playerInBeamY && !playerInSafeCorridor) {
+        if (this.player.shieldActive) {
+          // Shield absorbs hit
+          soundManager.playShieldAbsorb();
+        } else {
+          // One-shot instant kill!
+          this.stats.deathReason = 'santiscat_oneshot';
+          this.takePlayerDamage(9999, 'laser');
+        }
+      }
+    }
+
+    if (rb.timer >= rb.chargeDuration + rb.fireDuration) {
+      rb.active = false;
+      s.currentAttack = 'idle';
+      s.attackCooldown = 2.2;
+    }
+  }
+
+  // --- ATTACK 2: SPIRAL GALAXIES ---
+  private triggerSantiscatGalaxies() {
+    const s = this.santiscat!;
+    s.currentAttack = 'spiral_galaxy';
+    s.attackTimer = 0;
+    soundManager.playEnergyBlades();
+    this.screenShake = 16;
+
+    // Spawn 3 spinning galaxies cutting across spacetime
+    const colors = ['#c084fc', '#38bdf8', '#facc15'];
+    for (let i = 0; i < 3; i++) {
+      const ang = (i * Math.PI * 2) / 3 + Math.random() * 0.4;
+      const speed = 7.5;
+      s.galaxies.push({
+        id: `galaxy_${Date.now()}_${i}`,
+        x: s.x + Math.cos(ang) * 90,
+        y: s.y + Math.sin(ang) * 90,
+        vx: Math.cos(ang) * speed,
+        vy: Math.sin(ang) * speed,
+        radius: 68,
+        rotation: 0,
+        rotSpeed: (Math.random() > 0.5 ? 1 : -1) * 3.8,
+        color: colors[i % colors.length],
+        life: 4.8,
+        maxLife: 4.8,
+      });
+    }
+  }
+
+  private updateSantiscatGalaxies(delta: number) {
+    const s = this.santiscat!;
+    s.attackTimer += delta;
+
+    s.galaxies.forEach(g => {
+      g.life -= delta;
+      g.rotation += g.rotSpeed * delta;
+      // Slight homing drift towards player
+      const angToPlayer = Math.atan2(this.player.y - g.y, this.player.x - g.x);
+      g.vx += Math.cos(angToPlayer) * delta * 4;
+      g.vy += Math.sin(angToPlayer) * delta * 4;
+      g.x += g.vx * delta * 60;
+      g.y += g.vy * delta * 60;
+
+      // Check collision with player
+      const dist = Math.hypot(this.player.x - g.x, this.player.y - g.y);
+      if (dist < g.radius + this.player.width * 0.4) {
+        this.takePlayerDamage(35, 'laser');
+        this.spawnHitParticles(g.x, g.y, g.color, 12);
+      }
+    });
+
+    s.galaxies = s.galaxies.filter(g => g.life > 0);
+
+    if (s.attackTimer >= 4.8) {
+      s.currentAttack = 'idle';
+      s.attackCooldown = 1.9;
+    }
+  }
+
+  // --- ATTACK 3: GIANT STARS & SUPERNOVAS ---
+  private triggerSantiscatGiantStars() {
+    const s = this.santiscat!;
+    s.currentAttack = 'giant_stars';
+    s.attackTimer = 0;
+    soundManager.playSunBlast();
+    this.screenShake = 24;
+
+    this.damageNumbers.push({
+      id: Math.random().toString(),
+      text: '🌟 ¡COLAPSO ESTELAR! ¡SUPERNOVAS EN FORMACIÓN! 🌟',
+      x: s.x,
+      y: s.y - 85,
+      vy: -1.3,
+      color: '#f59e0b',
+      isBlackFlash: true,
+      life: 2.2,
+      maxLife: 2.2,
+      scale: 1.45,
+    });
+
+    // Spawn 2 giant burning stars
+    const starColors = ['#f59e0b', '#ef4444'];
+    [-1, 1].forEach((dir, i) => {
+      s.giantStars.push({
+        id: `star_${Date.now()}_${i}`,
+        x: s.x + dir * 180,
+        y: s.y - 120,
+        vx: dir * 4.6,
+        vy: (Math.random() - 0.5) * 2.8,
+        radius: 68,
+        color: starColors[i],
+        explosionTimer: 2.4,
+        exploded: false,
+      });
+    });
+  }
+
+  private updateSantiscatGiantStars(delta: number) {
+    const s = this.santiscat!;
+    s.attackTimer += delta;
+
+    s.giantStars.forEach(st => {
+      if (!st.exploded) {
+        st.x += st.vx * delta * 60;
+        st.y += st.vy * delta * 60;
+        st.explosionTimer -= delta;
+
+        // Stellar fusion particle aura
+        if (Math.random() < 0.65) {
+          const pAng = Math.random() * Math.PI * 2;
+          this.particles.push({
+            x: st.x + Math.cos(pAng) * st.radius,
+            y: st.y + Math.sin(pAng) * st.radius,
+            vx: Math.cos(pAng) * 3,
+            vy: Math.sin(pAng) * 3,
+            size: Math.random() * 6 + 3,
+            color: st.color,
+            life: 0.4,
+            maxLife: 0.4,
+            alpha: 1,
+            shape: 'circle',
+          });
+        }
+
+        // Explode into Colossal Supernova!
+        if (st.explosionTimer <= 0) {
+          st.exploded = true;
+          soundManager.playSupernova();
+          this.screenShake = 45;
+
+          s.supernovas.push({
+            id: `supernova_${Date.now()}_${Math.random()}`,
+            x: st.x,
+            y: st.y,
+            radius: 25,
+            maxRadius: 480, // Colossal, epic blast radius
+            color: st.color,
+            life: 2.4,
+            maxLife: 2.4,
+          });
+
+          // Massive multi-colored blast particles
+          this.spawnHitParticles(st.x, st.y, '#ffffff', 40);
+          this.spawnHitParticles(st.x, st.y, '#facc15', 35);
+          this.spawnHitParticles(st.x, st.y, st.color, 35);
+          this.spawnHitParticles(st.x, st.y, '#a855f7', 25);
+          this.spawnRubble(st.x, st.y, '#ea580c', 25);
+
+          this.damageNumbers.push({
+            id: Math.random().toString(),
+            text: '💥 ¡ESTALLIDO CÓSMICO DE SUPERNOVA! 💥',
+            x: st.x,
+            y: st.y - 70,
+            vy: -1.6,
+            color: '#fbbf24',
+            isBlackFlash: true,
+            life: 2.2,
+            maxLife: 2.2,
+            scale: 1.5,
+          });
+        }
+      }
+    });
+
+    s.giantStars = s.giantStars.filter(st => !st.exploded);
+
+    if (s.attackTimer >= 4.2) {
+      s.currentAttack = 'idle';
+      s.attackCooldown = 2.2;
+    }
+  }
+
+  private updateSantiscatSupernovas(delta: number) {
+    if (!this.santiscat) return;
+    const s = this.santiscat;
+
+    s.supernovas.forEach(sn => {
+      sn.life -= delta;
+      const progress = 1 - sn.life / sn.maxLife;
+      // Explosive expansion curve (fast burst out, then expanding front)
+      const ease = 1 - Math.pow(1 - progress, 2.2);
+      sn.radius = 25 + (sn.maxRadius - 25) * ease;
+
+      // Shockwave ring hits & pushes player
+      const dist = Math.hypot(this.player.x - sn.x, this.player.y - sn.y);
+
+      if (dist < sn.radius + 35) {
+        // Relativistic shockwave push
+        const ang = Math.atan2(this.player.y - sn.y, this.player.x - sn.x);
+        const pushForce = Math.max(3, (1 - dist / sn.maxRadius) * 20);
+        this.player.x += Math.cos(ang) * pushForce;
+        this.player.y += Math.sin(ang) * pushForce;
+
+        if (Math.abs(dist - sn.radius) < 55) {
+          this.takePlayerDamage(55, 'meteor');
+          this.spawnHitParticles(this.player.x, this.player.y, sn.color, 14);
+        }
+      }
+    });
+
+    s.supernovas = s.supernovas.filter(sn => sn.life > 0);
+  }
+
+  // --- ATTACK 4: OMEGA FLOWEY SAVE & LOAD MECHANIC ---
+  private triggerSantiscatOmegaSaveLoad() {
+    const s = this.santiscat!;
+    s.currentAttack = 'omega_save_load';
+    s.attackTimer = 0;
+
+    // Step 1: Save player state and checkpoint!
+    s.omegaSave = {
+      active: true,
+      hasSave: true,
+      stateText: 'FILE 1 SAVED',
+      textTimer: 1.6,
+      savedPlayerX: this.player.x,
+      savedPlayerY: this.player.y,
+      savedPlayerHp: this.player.hp,
+      savedAttack: 'omega_save_load',
+      loadTimer: 3.2,
+    };
+
+    soundManager.playOmegaSave();
+    this.screenShake = 20;
+
+    this.damageNumbers.push({
+      id: Math.random().toString(),
+      text: '[ FILE 1 SAVED ]',
+      x: s.x,
+      y: s.y - 85,
+      vy: -1.2,
+      color: '#38bdf8',
+      isBlackFlash: true,
+      life: 2.0,
+      maxLife: 2.0,
+      scale: 1.5,
+    });
+
+    // Launch intense initial barrage
+    this.launchOmegaBarrage();
+  }
+
+  private launchOmegaBarrage() {
+    const s = this.santiscat!;
+    // Rapid ring of star pellets
+    for (let i = 0; i < 8; i++) {
+      const ang = (i * Math.PI * 2) / 8 + Math.random() * 0.2;
+      const spd = 10.5;
+      this.projectiles.push({
+        id: Math.random().toString(),
+        type: 'santiscat_sun_shot',
+        x: s.x,
+        y: s.y,
+        vx: Math.cos(ang) * spd,
+        vy: Math.sin(ang) * spd,
+        radius: 12,
+        damage: 28,
+        duration: 0,
+        maxDuration: 3.2,
+        color: '#38bdf8',
+        glowColor: '#0284c7',
+        trail: [],
+      });
+    }
+  }
+
+  private updateSantiscatOmegaSaveLoad(delta: number) {
+    const s = this.santiscat!;
+    const os = s.omegaSave;
+    s.attackTimer += delta;
+
+    if (os.textTimer > 0) {
+      os.textTimer -= delta;
+    }
+
+    if (os.loadTimer > 0) {
+      os.loadTimer -= delta;
+      if (os.loadTimer <= 0 && os.hasSave) {
+        // Step 2: LOAD! Rewind player position back to saved point and replay attacks!
+        os.hasSave = false;
+        os.stateText = 'FILE 1 LOADED';
+        os.textTimer = 1.8;
+        soundManager.playOmegaLoad();
+        this.screenShake = 32;
+
+        // Teleport player back to saved location!
+        this.player.x = os.savedPlayerX;
+        this.player.y = os.savedPlayerY;
+        this.spawnHitParticles(this.player.x, this.player.y, '#38bdf8', 25);
+
+        this.damageNumbers.push({
+          id: Math.random().toString(),
+          text: '[ FILE 1 LOADED ]',
+          x: this.player.x,
+          y: this.player.y - 40,
+          vy: -1.5,
+          color: '#f43f5e',
+          isBlackFlash: true,
+          life: 2.0,
+          maxLife: 2.0,
+          scale: 1.5,
+        });
+
+        // Replay barrage immediately!
+        this.launchOmegaBarrage();
+      }
+    }
+
+    if (s.attackTimer >= 5.0) {
+      os.active = false;
+      s.currentAttack = 'idle';
+      s.attackCooldown = 2.0;
+    }
+  }
+
+  // --- TRANSITION TO PHASE 2.5: ANOTHER UNIVERSE ---
+  public transitionToPhase25Universe() {
+    if (!this.santiscat) return;
+    const s = this.santiscat;
+    this.stage = 'santiscat_boss_universe';
+    s.bossPhase = 2.5;
+    s.currentAttack = 'idle';
+    s.attackCooldown = 1.5;
+    soundManager.playMusic('santiscat_phase25');
+
+    this.screenShake = 38;
+    this.spawnHitParticles(s.x, s.y, '#ffffff', 40);
+    this.spawnHitParticles(this.player.x, this.player.y, '#ef4444', 30);
+
+    this.damageNumbers.push({
+      id: Math.random().toString(),
+      text: '🌌 ¡FASE 2.5: HAS LLEGADO A OTRO UNIVERSO! 🌌',
+      x: this.player.x,
+      y: this.player.y - 70,
+      vy: -1.6,
+      color: '#e0e7ff',
+      isBlackFlash: true,
+      life: 3.5,
+      maxLife: 3.5,
+      scale: 1.6,
+    });
+  }
+
+  // --- PHASE 2.5 EXCLUSIVE: REFUSED TO DIE ("PERO SE REHUSÓ A MORIR") ---
+  public triggerRefusedToDie() {
+    if (!this.santiscat) return;
+    const s = this.santiscat;
+
+    soundManager.playRefuseToDie();
+    this.screenShake = 35;
+
+    // Restore full HP & grant protective invulnerability
+    this.player.hp = this.player.maxHp;
+    this.player.isInvulnerable = true;
+    this.player.invulnerableTimer = 3.5;
+    this.player.shieldActive = true;
+    this.player.shieldTimer = 3.0;
+
+    s.refusedToDie = {
+      active: true,
+      phase: 'heart_shattering',
+      timer: 0,
+      heartX: this.player.x,
+      heartY: this.player.y,
+      crackProgress: 0,
+      alpha: 1,
+    };
+
+    this.damageNumbers.push({
+      id: Math.random().toString(),
+      text: '❤️ ¡PERO TE REHUSASTE A MORIR! ❤️',
+      x: this.player.x,
+      y: this.player.y - 50,
+      vy: -1.8,
+      color: '#ef4444',
+      isBlackFlash: true,
+      life: 3.2,
+      maxLife: 3.2,
+      scale: 1.65,
+    });
+
+    this.spawnHitParticles(this.player.x, this.player.y, '#ef4444', 35);
+    this.spawnHitParticles(this.player.x, this.player.y, '#ffffff', 25);
+  }
+
+  // --- SANTISCAT FINAL DEFEAT CINEMATIC (PROCEDURAL IMPLOSION & GIANT SUPERNOVA EXPLOSION) ---
+  public startSantiscatDefeatCinematic(broadcast: boolean = true) {
+    this.stage = 'cinematic_santiscat_defeat';
+    soundManager.stopMusic();
+    soundManager.playSoulRelease();
+    this.screenShake = 32;
+
+    const sX = this.santiscat ? this.santiscat.x : (this.camera.x + this.camera.viewportWidth / 2);
+    const sY = this.santiscat ? this.santiscat.y : (this.camera.y + this.camera.viewportHeight / 2);
+
+    if (this.santiscat) {
+      this.santiscat.hp = 0;
+      this.santiscat.currentAttack = 'idle';
+      this.santiscat.attackCooldown = 999;
+      // Deactivate summons and dangerous domains
+      this.santiscat.jujutsuSummons.forEach(sm => (sm.active = false));
+      this.santiscat.shrine.active = false;
+      this.santiscat.shrine.chanting = false;
+      this.santiscat.gojoTechniques.blue.active = false;
+      this.santiscat.gojoTechniques.red.active = false;
+      this.santiscat.gojoTechniques.purple.active = false;
+      this.santiscat.rainbowBlast.active = false;
+      this.santiscat.blackHole.active = false;
+      this.santiscat.galaxies = [];
+      this.santiscat.giantStars = [];
+      this.santiscat.supernovas = [];
+    }
+
+    // Cancel hostile projectiles
+    this.projectiles = this.projectiles.filter(p => p.type.startsWith('player_'));
+
+    const soulData = [
+      { id: '1', name: 'Determinación', color: '#ef4444', glowColor: '#fca5a5' },
+      { id: '2', name: 'Paciencia', color: '#06b6d4', glowColor: '#67e8f9' },
+      { id: '3', name: 'Valentía', color: '#f97316', glowColor: '#fdba74' },
+      { id: '4', name: 'Integridad', color: '#3b82f6', glowColor: '#93c5fd' },
+      { id: '5', name: 'Perseverancia', color: '#a855f7', glowColor: '#d8b4fe' },
+      { id: '6', name: 'Amabilidad', color: '#22c55e', glowColor: '#86efac' },
+      { id: '7', name: 'Justicia', color: '#eab308', glowColor: '#fef08a' },
+      { id: '8', name: 'Esperanza', color: '#ec4899', glowColor: '#fbcfe8' },
+      { id: '9', name: 'Armonía', color: '#14b8a6', glowColor: '#99f6e4' },
+      { id: '10', name: 'Luz Cósmica', color: '#8b5cf6', glowColor: '#c4b5fd' },
+      { id: '11', name: 'Sabiduría', color: '#6366f1', glowColor: '#a5b4fc' },
+      { id: '12', name: 'Libertad', color: '#ffffff', glowColor: '#f8fafc' },
+    ];
+
+    const souls = soulData.map((sd, i) => ({
+      id: sd.id,
+      name: sd.name,
+      color: sd.color,
+      glowColor: sd.glowColor,
+      angle: (i * Math.PI * 2) / 12,
+      distance: 0,
+      speed: 1.8 + i * 0.12,
+      scale: 1.0,
+      alpha: 1.0,
+    }));
+
+    this.santiscatDefeatCinematic = {
+      active: true,
+      timer: 0,
+      maxDuration: 12.5,
+      phase: 'shining_souls_release',
+      lightIntensity: 0.2,
+      implosionProgress: 0,
+      explosionRadius: 0,
+      flashAlpha: 0,
+      santiscatX: sX,
+      santiscatY: sY,
+      shieldActivatedInTime: false,
+      warningSoundPlayed: false,
+      implosionSoundPlayed: false,
+      explosionSoundPlayed: false,
+      souls,
+    };
+
+    this.damageNumbers.push({
+      id: Math.random().toString(),
+      text: '✨ ¡SANTISCAT HA SIDO VENCIDO! ¡LIBERACIÓN DE LAS 12 ALMAS! ✨',
+      x: sX,
+      y: sY - 95,
+      vy: -1.3,
+      color: '#facc15',
+      isBlackFlash: true,
+      life: 3.5,
+      maxLife: 3.5,
+      scale: 1.5,
+    });
+
+    if (broadcast && this.isMultiplayer) {
+      multiplayerClient.sendStageChange('cinematic_santiscat_defeat', 0);
+    }
+  }
+
+  public updateSantiscatDefeatCinematic(delta: number) {
+    if (!this.santiscatDefeatCinematic) return;
+    const c = this.santiscatDefeatCinematic;
+    c.timer += delta;
+
+    // Center camera on Santiscat
+    const targetCamX = c.santiscatX - this.camera.viewportWidth / 2;
+    const targetCamY = c.santiscatY - this.camera.viewportHeight / 2;
+    this.camera.x += (targetCamX - this.camera.x) * 0.08;
+    this.camera.y += (targetCamY - this.camera.y) * 0.08;
+
+    // Check player shield activation (from touch or keyboard)
+    if (this.player.shieldActive || this.player.holdingShield || this.keys['keyk'] || this.keys['shiftleft'] || this.keys['shiftright'] || this.keys['keyc']) {
+      c.shieldActivatedInTime = true;
+      this.player.shieldActive = true;
+      this.player.shieldTimer = Math.max(this.player.shieldTimer, 3.5);
+    }
+
+    // Phase 1: 0.0s to 3.5s - Super bright divine light & 12 human souls release
+    if (c.timer < 3.5) {
+      c.phase = 'shining_souls_release';
+      c.lightIntensity = Math.min(1.0, c.timer / 3.0);
+      c.souls.forEach(s => {
+        s.distance = Math.min(380, s.distance + delta * 120);
+        s.angle += delta * s.speed;
+        // Sparkle trails
+        if (Math.random() < 0.45) {
+          const sx = c.santiscatX + Math.cos(s.angle) * s.distance;
+          const sy = c.santiscatY + Math.sin(s.angle) * s.distance;
+          this.particles.push({
+            x: sx,
+            y: sy,
+            vx: (Math.random() - 0.5) * 2,
+            vy: (Math.random() - 0.5) * 2,
+            size: Math.random() * 5 + 2,
+            color: s.color,
+            life: 0.4,
+            maxLife: 0.4,
+            alpha: 1,
+            shape: 'spark',
+          });
+        }
+      });
+      // Blinding god rays particles from Santiscat
+      if (Math.random() < 0.6) {
+        const rayAng = Math.random() * Math.PI * 2;
+        this.particles.push({
+          x: c.santiscatX,
+          y: c.santiscatY,
+          vx: Math.cos(rayAng) * (Math.random() * 8 + 4),
+          vy: Math.sin(rayAng) * (Math.random() * 8 + 4),
+          size: Math.random() * 8 + 4,
+          color: '#ffffff',
+          life: 0.6,
+          maxLife: 0.6,
+          alpha: 1,
+          shape: 'circle',
+        });
+      }
+    }
+    // Phase 2: 3.5s to 7.0s - Emergency hazard warning: raise shield!
+    else if (c.timer < 7.0) {
+      c.phase = 'shield_warning';
+      if (!c.warningSoundPlayed) {
+        soundManager.playShieldWarning();
+        c.warningSoundPlayed = true;
+      }
+      c.lightIntensity = 1.0;
+      // Pulse screen shake
+      this.screenShake = Math.max(this.screenShake, 6 + Math.sin(c.timer * 12) * 4);
+
+      c.souls.forEach(s => {
+        s.distance = Math.min(520, s.distance + delta * 60);
+        s.angle += delta * (s.speed * 1.3);
+      });
+    }
+    // Phase 3: 7.0s to 9.2s - Procedural WebGL Spacetime Implosion
+    else if (c.timer < 9.2) {
+      c.phase = 'shader_implosion';
+      if (!c.implosionSoundPlayed) {
+        soundManager.playCosmicImplosion();
+        c.implosionSoundPlayed = true;
+      }
+      c.implosionProgress = Math.min(1.0, (c.timer - 7.0) / 2.2);
+      this.screenShake = Math.max(this.screenShake, 12 + c.implosionProgress * 25);
+
+      // Suck particles and souls inwards towards singularity
+      c.souls.forEach(s => {
+        s.distance = Math.max(20, s.distance - delta * (c.implosionProgress * 280));
+        s.angle += delta * (s.speed * 3.5);
+      });
+
+      // Spawn inward vortex dust
+      if (Math.random() < 0.8) {
+        const ang = Math.random() * Math.PI * 2;
+        const rad = Math.random() * 350 + 150;
+        this.particles.push({
+          x: c.santiscatX + Math.cos(ang) * rad,
+          y: c.santiscatY + Math.sin(ang) * rad,
+          vx: -Math.cos(ang) * 9 * (1 + c.implosionProgress),
+          vy: -Math.sin(ang) * 9 * (1 + c.implosionProgress),
+          size: Math.random() * 6 + 3,
+          color: Math.random() > 0.5 ? '#a855f7' : '#38bdf8',
+          life: 0.35,
+          maxLife: 0.35,
+          alpha: 1,
+          shape: 'spark',
+        });
+      }
+    }
+    // Phase 4: 9.2s to 12.2s - Giant Cosmic Supernova Explosion
+    else if (c.timer < 12.2) {
+      c.phase = 'giant_explosion';
+      if (!c.explosionSoundPlayed) {
+        soundManager.playCosmicSupernovaDefeat();
+        c.flashAlpha = 1.0;
+        this.screenShake = 65;
+        c.explosionSoundPlayed = true;
+
+        // Disintegrate Santiscat completely
+        this.spawnRubble(c.santiscatX, c.santiscatY, '#a855f7', 80);
+        this.spawnRubble(c.santiscatX, c.santiscatY, '#f59e0b', 70);
+        this.spawnHitParticles(c.santiscatX, c.santiscatY, '#ffffff', 80);
+        this.spawnHitParticles(c.santiscatX, c.santiscatY, '#38bdf8', 60);
+
+        // Feedback for shield coverage
+        if (this.player.shieldActive || c.shieldActivatedInTime) {
+          this.damageNumbers.push({
+            id: Math.random().toString(),
+            text: '🛡️ ¡ESCUDO RESISTIÓ LA EXPLOSIÓN CÓSMICA! 🛡️',
+            x: this.player.x,
+            y: this.player.y - 45,
+            vy: -1.6,
+            color: '#34d399',
+            isBlackFlash: true,
+            life: 3.0,
+            maxLife: 3.0,
+            scale: 1.5,
+          });
+        } else {
+          this.damageNumbers.push({
+            id: Math.random().toString(),
+            text: '💥 ¡ONDA EXPANSIVA CÓSMICA! 💥',
+            x: this.player.x,
+            y: this.player.y - 45,
+            vy: -1.6,
+            color: '#ef4444',
+            isBlackFlash: true,
+            life: 3.0,
+            maxLife: 3.0,
+            scale: 1.5,
+          });
+        }
+      }
+
+      // Flash decay
+      if (c.flashAlpha > 0) {
+        c.flashAlpha = Math.max(0, c.flashAlpha - delta * 0.9);
+      }
+
+      c.explosionRadius += delta * 2400;
+
+      // Blast wave pushes player outward smoothly
+      const pDist = Math.hypot(this.player.x - c.santiscatX, this.player.y - c.santiscatY);
+      if (pDist < c.explosionRadius + 100) {
+        const pAng = Math.atan2(this.player.y - c.santiscatY, this.player.x - c.santiscatX);
+        const force = (this.player.shieldActive || c.shieldActivatedInTime) ? 4 : 14;
+        this.player.x += Math.cos(pAng) * force;
+        this.player.y += Math.sin(pAng) * force;
+      }
+    }
+    // Phase 5: Fade to Victory Modal
+    else {
+      c.phase = 'fade_to_victory';
       this.triggerVictory(true);
+    }
+  }
+
+  public skipSantiscatDefeatCinematic() {
+    if (this.stage === 'cinematic_santiscat_defeat') {
+      this.triggerVictory(true);
+    }
+  }
+
+  // --- CHEAT / TEST HELPERS FOR ADMIN PANEL ---
+  public testSantiscatPhase2() {
+    this.initSantiscatBoss();
+    if (!this.santiscat) return;
+    this.santiscat.hp = 1;
+    this.startSantiscatPhase2Cinematic();
+  }
+
+  public testSantiscatPhase25() {
+    this.initSantiscatBoss();
+    if (!this.santiscat) return;
+    this.santiscat.bossPhase = 2.5;
+    this.santiscat.hp = 99999;
+    this.santiscat.maxHp = 99999;
+    this.transitionToPhase25Universe();
+  }
+
+  public testSantiscatDefeatCinematic() {
+    this.initSantiscatBoss();
+    if (!this.santiscat) return;
+    this.santiscat.hp = 0;
+    this.startSantiscatDefeatCinematic();
+  }
+
+  // =========================================================================
+  // JUJUTSU KAISEN SUMMONS: SUKUNACAT & GOJOCAT AI & TECHNIQUES
+  // =========================================================================
+
+  private updateSantiscatSummonCats(delta: number) {
+    const s = this.santiscat!;
+    s.attackTimer += delta;
+    if (s.attackTimer >= 1.2) {
+      s.currentAttack = 'idle';
+      s.attackCooldown = 3.6;
+    }
+  }
+
+  // --- JUJUTSU SUMMON ATTACK CHECKS (MUTUAL EXCLUSION) ---
+  public isSukunacatAttacking(): boolean {
+    if (!this.santiscat) return false;
+    const sukunacat = this.santiscat.jujutsuSummons.find(s => s.id === 'sukunacat');
+    if (!sukunacat || !sukunacat.active) return false;
+
+    // Check if Sukunacat is currently executing an attack
+    if (
+      sukunacat.state === 'dash' ||
+      sukunacat.state === 'cleave_slashes' ||
+      sukunacat.state === 'domain_chant' ||
+      sukunacat.state === 'domain_active'
+    ) {
+      return true;
+    }
+    // Check if Malevolent Shrine is active
+    if (this.santiscat.shrine && this.santiscat.shrine.active) {
+      return true;
+    }
+    // Check if Cleave / Dismantle slashes are still active
+    if (sukunacat.slashes && sukunacat.slashes.length > 0) {
+      return true;
+    }
+    return false;
+  }
+
+  public isGojocatAttacking(): boolean {
+    if (!this.santiscat) return false;
+    const gojocat = this.santiscat.jujutsuSummons.find(s => s.id === 'gojocat');
+    if (!gojocat || !gojocat.active) return false;
+
+    // Check if Gojocat is in an attack state
+    if (
+      gojocat.state === 'purple_charge' ||
+      gojocat.state === 'purple_fire' ||
+      gojocat.state === 'lapse_blue' ||
+      gojocat.state === 'reversal_red'
+    ) {
+      return true;
+    }
+    // Check if any Gojo technique is active on the field (Blue suction, Red repulsion, or Purple projectile)
+    const gt = this.santiscat.gojoTechniques;
+    if (gt) {
+      if (gt.blue && gt.blue.active) return true;
+      if (gt.red && gt.red.active) return true;
+      if (gt.purple && gt.purple.active) return true;
+    }
+    return false;
+  }
+
+  private updateJujutsuSummons(delta: number) {
+    if (!this.santiscat) return;
+    const summons = this.santiscat.jujutsuSummons;
+
+    summons.forEach(sm => {
+      if (!sm.active) return;
+      if (sm.id === 'sukunacat') {
+        this.updateSukunacat(sm, delta);
+      } else if (sm.id === 'gojocat') {
+        this.updateGojocat(sm, delta);
+      }
+    });
+  }
+
+  // --- SUKUNACAT AI ---
+  private updateSukunacat(sm: JujutsuSummon, delta: number) {
+    const p = this.player;
+    sm.timer += delta;
+    sm.facing = p.x < sm.x ? -1 : 1;
+
+    // Hand punch progress decay & cooldown
+    if (sm.cooldownTimer > 0) sm.cooldownTimer -= delta;
+
+    // Independent slashes update loop (runs on EVERY frame!)
+    this.updateSukunacatSlashes(sm, delta);
+
+    if (sm.state === 'idle' || sm.state === 'follow') {
+      // Smooth stalking movement towards player maintaining 180-260px distance
+      const targetDist = 220;
+      const dx = p.x - sm.x;
+      const dy = p.y - sm.y;
+      const dist = Math.hypot(dx, dy) || 1;
+
+      if (dist > targetDist + 40) {
+        sm.x += (dx / dist) * 4.8 * delta * 60;
+        sm.y += (dy / dist) * 4.8 * delta * 60;
+      } else if (dist < targetDist - 30) {
+        sm.x -= (dx / dist) * 3.2 * delta * 60;
+        sm.y -= (dy / dist) * 3.2 * delta * 60;
+      }
+
+      // Floating sine bob
+      sm.y += Math.sin(this.stats.timeElapsed * 3.5) * 0.8;
+
+      // Verificación de exclusión mutua: si Gojocat está lanzando un ataque, Sukunacat DEBE esperar a que termine
+      const isGojoAttacking = this.isGojocatAttacking();
+      if (isGojoAttacking) {
+        // Pausa el cooldown para que no lance nada hasta que Gojocat haya terminado por completo
+        if (sm.cooldownTimer < 0.6) {
+          sm.cooldownTimer = 0.6;
+        }
+      } else if (sm.cooldownTimer <= 0) {
+        const canDomain = !this.santiscat!.shrine.active && (sm.timer > 12.0 || Math.random() < 0.35);
+        if (canDomain) {
+          // Trigger Malevolent Shrine Chant!
+          sm.state = 'domain_chant';
+          sm.timer = 0;
+          sm.chantText = 'Ryoiki Tenkai... Fukuma Mizushi!';
+          soundManager.playDomainChant();
+          this.screenShake = 18;
+          this.damageNumbers.push({
+            id: Math.random().toString(),
+            text: '⛩️ "RYOIKI TENKAI... FUKUMA MIZUSHI" ⛩️',
+            x: sm.x,
+            y: sm.y - 70,
+            vy: -1.2,
+            color: '#dc2626',
+            isBlackFlash: true,
+            life: 2.5,
+            maxLife: 2.5,
+            scale: 1.5,
+          });
+        } else {
+          // Alternate between Dash & Cleave slashes
+          const pickDash = Math.random() < 0.5;
+          if (pickDash) {
+            sm.state = 'dash';
+            sm.timer = 0;
+            sm.dashTarget = { x: p.x, y: p.y };
+            soundManager.playSukunaDash();
+            this.spawnHitParticles(sm.x, sm.y, '#dc2626', 15);
+          } else {
+            sm.state = 'cleave_slashes';
+            sm.timer = 0;
+            this.triggerSukunacatCleave(sm);
+          }
+        }
+      }
+    } else if (sm.state === 'dash') {
+      // High-speed rush in direction of player to deal physical damage
+      if (sm.dashTarget) {
+        const dx = sm.dashTarget.x - sm.x;
+        const dy = sm.dashTarget.y - sm.y;
+        const dist = Math.hypot(dx, dy) || 1;
+        const dashSpeed = 19;
+
+        sm.x += (dx / dist) * dashSpeed * delta * 60;
+        sm.y += (dy / dist) * dashSpeed * delta * 60;
+
+        // Red supersonic dash trail
+        this.particles.push({
+          x: sm.x + (Math.random() - 0.5) * 20,
+          y: sm.y + (Math.random() - 0.5) * 20,
+          vx: -(dx / dist) * 3,
+          vy: -(dy / dist) * 3,
+          size: 6,
+          color: Math.random() > 0.5 ? '#dc2626' : '#991b1b',
+          life: 0.3,
+          maxLife: 0.3,
+          alpha: 1,
+          shape: 'spark',
+        });
+
+        // Collision check with player
+        const pDist = Math.hypot(this.player.x - sm.x, this.player.y - sm.y);
+        if (pDist < this.player.width * 0.45 + sm.width * 0.4) {
+          soundManager.playSukunaSlash();
+          this.takePlayerDamage(28, 'collision');
+          this.screenShake = 16;
+          this.spawnHitParticles(this.player.x, this.player.y, '#dc2626', 18);
+          sm.state = 'idle';
+          sm.cooldownTimer = 1.6;
+        }
+
+        if (dist < 40 || sm.timer >= 0.6) {
+          sm.state = 'idle';
+          sm.cooldownTimer = 1.6;
+        }
+      }
+    } else if (sm.state === 'cleave_slashes') {
+      if (sm.timer >= 0.75) {
+        sm.state = 'idle';
+        sm.cooldownTimer = 1.8;
+      }
+    } else if (sm.state === 'domain_chant') {
+      // Chanting for 1.5 seconds, then Malevolent Shrine explodes into reality
+      if (sm.timer >= 1.5) {
+        sm.state = 'domain_active';
+        sm.timer = 0;
+        const shrine = this.santiscat!.shrine;
+        shrine.active = true;
+        shrine.chanting = false;
+        shrine.timer = 0;
+        shrine.shrineX = sm.x;
+        shrine.shrineY = sm.y - 100;
+        shrine.redIntensity = 0.1;
+        shrine.cuts = [];
+        shrine.damageTickTimer = 0;
+
+        soundManager.playDomainExpansion();
+        this.screenShake = 32;
+        this.spawnHitParticles(sm.x, sm.y, '#ff003b', 50);
+        this.spawnHitParticles(sm.x, sm.y, '#000000', 40);
+
+        this.damageNumbers.push({
+          id: Math.random().toString(),
+          text: '⚡ ¡MALEVOLENT SHRINE ACTIVADO! MANTÉN [K] ⚡',
+          x: this.player.x,
+          y: this.player.y - 85,
+          vy: -1.6,
+          color: '#facc15',
+          isBlackFlash: true,
+          life: 3.0,
+          maxLife: 3.0,
+          scale: 1.5,
+        });
+      }
+    } else if (sm.state === 'domain_active') {
+      // Hover in center while Malevolent Shrine runs
+      if (!this.santiscat!.shrine.active) {
+        sm.state = 'idle';
+        sm.cooldownTimer = 9.0;
+        sm.chantText = undefined;
+      }
+    }
+  }
+
+  private triggerSukunacatCleave(sm: JujutsuSummon) {
+    soundManager.playSukunaSlash();
+    this.screenShake = 14;
+    // Launch 3 sharp Cleave/Dismantle cutting fractures in arc towards player directly into sm.slashes!
+    for (let i = 0; i < 3; i++) {
+      const baseAng = Math.atan2(this.player.y - sm.y, this.player.x - sm.x);
+      const ang = baseAng + (i - 1) * 0.35;
+      const len = 350;
+      const cx = this.player.x + (Math.random() - 0.5) * 120;
+      const cy = this.player.y + (Math.random() - 0.5) * 120;
+
+      sm.slashes.push({
+        id: `cleave_${Date.now()}_${i}`,
+        x1: cx - Math.cos(ang) * (len / 2),
+        y1: cy - Math.sin(ang) * (len / 2),
+        x2: cx + Math.cos(ang) * (len / 2),
+        y2: cy + Math.sin(ang) * (len / 2),
+        phase: 'telegraph',
+        timer: 0,
+        maxTimer: 0.85,
+        width: 24,
+        damage: 28,
+        hasHit: false,
+      });
+    }
+  }
+
+  private updateSukunacatSlashes(sm: JujutsuSummon, delta: number) {
+    if (!sm.slashes || sm.slashes.length === 0) return;
+
+    sm.slashes.forEach(slash => {
+      slash.timer += delta;
+      if (slash.timer < 0.55) {
+        slash.phase = 'telegraph';
+      } else if (slash.timer < 0.85) {
+        if (slash.phase === 'telegraph') {
+          soundManager.playSukunaSlash();
+          this.screenShake = 16;
+          // Check collision between player and line segment (x1, y1) to (x2, y2)
+          const px = this.player.x;
+          const py = this.player.y;
+          const ldx = slash.x2 - slash.x1;
+          const ldy = slash.y2 - slash.y1;
+          const lenSq = ldx * ldx + ldy * ldy || 1;
+          const t = Math.max(0, Math.min(1, ((px - slash.x1) * ldx + (py - slash.y1) * ldy) / lenSq));
+          const projX = slash.x1 + t * ldx;
+          const projY = slash.y1 + t * ldy;
+          const distToLine = Math.hypot(px - projX, py - projY);
+
+          if (distToLine < slash.width + this.player.width * 0.4 && !slash.hasHit) {
+            slash.hasHit = true;
+            this.stats.deathReason = 'reality_tear';
+            const safeDamage = Math.min(slash.damage, Math.max(1, this.player.hp - 10));
+            this.takePlayerDamage(safeDamage, 'collision');
+            this.spawnHitParticles(px, py, '#dc2626', 16);
+            this.spawnHitParticles(px, py, '#000000', 8);
+          }
+        }
+        slash.phase = 'slash';
+      } else {
+        slash.phase = 'fade';
+      }
+    });
+
+    sm.slashes = sm.slashes.filter(s => s.timer < s.maxTimer + 0.3);
+  }
+
+  // --- MALEVOLENT SHRINE (TEMPLO DEL MAL) UPDATE ---
+  // Thousands of cuts sweeping the entire map with blood-red effect.
+  // Player MUST hold 'K' (or shield) to withstand until domain finishes.
+  // Cuts CANNOT damage Santiscat, Gojocat, or Sukunacat (ONLY player).
+  // Music switches to domain_expansion and reverts on domain finish.
+  private updateMalevolentShrine(delta: number) {
+    if (!this.santiscat) return;
+    const shrine = this.santiscat.shrine;
+    if (!shrine.active) return;
+
+    shrine.timer += delta;
+    shrine.redIntensity = Math.min(1.0, shrine.redIntensity + delta * 2.5);
+
+    // Keep domain expansion music looping
+    soundManager.playMusic('domain_expansion');
+
+    // Continuous dramatic earthquake screen shake
+    this.screenShake = Math.max(this.screenShake, 11);
+
+    // Procedural relentless rain of thousands of cuts across the map
+    const cutBatch = 8;
+    const cam = this.camera;
+    for (let i = 0; i < cutBatch; i++) {
+      const rx = cam.x + Math.random() * cam.viewportWidth;
+      const ry = cam.y + Math.random() * cam.viewportHeight;
+      const angle = Math.random() * Math.PI;
+      const len = 120 + Math.random() * 260;
+
+      shrine.cuts.push({
+        x1: rx - Math.cos(angle) * (len / 2),
+        y1: ry - Math.sin(angle) * (len / 2),
+        x2: rx + Math.cos(angle) * (len / 2),
+        y2: ry + Math.sin(angle) * (len / 2),
+        timer: 0,
+        maxTimer: 0.16,
+        alpha: 1.0,
+      });
+    }
+
+    // Decay and prune cuts
+    shrine.cuts.forEach(c => {
+      c.timer += delta;
+      c.alpha = Math.max(0, 1.0 - c.timer / c.maxTimer);
+    });
+    shrine.cuts = shrine.cuts.filter(c => c.timer < c.maxTimer);
+
+    // Damage tick every 0.22 seconds (Relentless domain slashing!)
+    shrine.damageTickTimer += delta;
+    if (shrine.damageTickTimer >= 0.22) {
+      shrine.damageTickTimer = 0;
+
+      // Check if player is holding 'K' or holding shield button
+      const p = this.player;
+      const isShieldHeld = Boolean(p.holdingShield || this.keys['keyk'] || this.keys['shiftleft'] || this.keys['shiftright'] || this.keys['keyc']);
+      const isDeflectingWithShield = p.shieldActive && isShieldHeld;
+
+      if (isDeflectingWithShield) {
+        // Player withstands the thousands of cuts using their shield!
+        soundManager.playShieldDeflect();
+        this.spawnHitParticles(p.x, p.y, '#34d399', 8);
+        this.spawnHitParticles(p.x, p.y, '#facc15', 6);
+      } else {
+        // Severe cleave damage dealt to player!
+        soundManager.playSukunaSlash();
+        this.takePlayerDamage(24, 'collision');
+        this.stats.deathReason = 'reality_tear';
+        this.spawnHitParticles(p.x, p.y, '#dc2626', 16);
+        this.spawnHitParticles(p.x, p.y, '#ffffff', 8);
+
+        this.damageNumbers.push({
+          id: Math.random().toString(),
+          text: '⚔️ CORTE DEL TEMPLO (-24) ¡MANTÉN [K]!',
+          x: p.x + (Math.random() - 0.5) * 50,
+          y: p.y - 35,
+          vy: -1.8,
+          color: '#ef4444',
+          isBlackFlash: false,
+          life: 0.9,
+          maxLife: 0.9,
+          scale: 1.25,
+        });
+      }
+    }
+
+    // When domain completes (7.2s)
+    if (shrine.timer >= shrine.maxDuration) {
+      shrine.active = false;
+      shrine.redIntensity = 0;
+      shrine.cuts = [];
+      // Revert music to official Santiscat battle theme!
+      soundManager.playMusic('santiscat');
+      this.screenShake = 20;
+      this.spawnHitParticles(shrine.shrineX, shrine.shrineY, '#ffffff', 30);
+    }
+  }
+
+  // --- GOJOCAT AI ---
+  private updateGojocat(sm: JujutsuSummon, delta: number) {
+    const p = this.player;
+    sm.timer += delta;
+    sm.facing = p.x < sm.x ? -1 : 1;
+
+    if (sm.cooldownTimer > 0) sm.cooldownTimer -= delta;
+
+    if (sm.state === 'idle' || sm.state === 'follow') {
+      // Hover at distance with Infinity barrier shimmer
+      const targetDist = 280;
+      const dx = p.x - sm.x;
+      const dy = p.y - sm.y;
+      const dist = Math.hypot(dx, dy) || 1;
+
+      if (dist > targetDist + 30) {
+        sm.x += (dx / dist) * 4.2 * delta * 60;
+        sm.y += (dy / dist) * 4.2 * delta * 60;
+      } else if (dist < targetDist - 30) {
+        sm.x -= (dx / dist) * 3.5 * delta * 60;
+        sm.y -= (dy / dist) * 3.5 * delta * 60;
+      }
+      sm.y += Math.cos(this.stats.timeElapsed * 2.8) * 0.9;
+
+      // Verificación de exclusión mutua: si Sukunacat está realizando un ataque (Dash, Cortes, o Templo del Mal),
+      // Gojocat DEBE esperar a que termine por completo antes de poder lanzar su propio ataque!
+      const isSukunaAttacking = this.isSukunacatAttacking();
+      if (isSukunaAttacking) {
+        // Pausa el cooldown para que no lance nada hasta que Sukunacat haya terminado por completo
+        if (sm.cooldownTimer < 0.6) {
+          sm.cooldownTimer = 0.6;
+        }
+      } else if (sm.cooldownTimer <= 0) {
+        // Techniques rotation: Blue -> Red -> Hollow Purple
+        const techRoll = Math.random();
+        if (techRoll < 0.38) {
+          this.triggerGojocatBlue(sm);
+        } else if (techRoll < 0.72) {
+          this.triggerGojocatRed(sm);
+        } else {
+          this.triggerGojocatPurple(sm);
+        }
+      }
+    } else if (sm.state === 'purple_charge') {
+      // Charging Hollow Purple: Red in left, Blue in right, converging
+      const purple = this.santiscat!.gojoTechniques.purple;
+      purple.fusionProgress = Math.min(1.0, sm.timer / 1.3);
+
+      if (sm.timer >= 1.3) {
+        // Fire giant Hollow Purple!
+        sm.state = 'idle';
+        sm.cooldownTimer = 3.2;
+        purple.phase = 'fired';
+        purple.timer = 0;
+        purple.x = sm.x;
+        purple.y = sm.y;
+
+        const ang = Math.atan2(this.player.y - sm.y, this.player.x - sm.x);
+        const speed = 10.5;
+        purple.vx = Math.cos(ang) * speed;
+        purple.vy = Math.sin(ang) * speed;
+        purple.radius = 95; // Giant sphere!
+
+        soundManager.playHollowPurple();
+        this.screenShake = 30;
+      }
+    } else if (sm.state === 'lapse_blue' || sm.state === 'reversal_red') {
+      if (sm.timer >= 1.5) {
+        sm.state = 'idle';
+        sm.cooldownTimer = 2.0;
+      }
+    }
+  }
+
+  // Gojo Technique 1: Azul (Rotación del Ritual - Singularity Suction)
+  private triggerGojocatBlue(sm: JujutsuSummon) {
+    sm.state = 'lapse_blue';
+    sm.timer = 0;
+    const blue = this.santiscat!.gojoTechniques.blue;
+    blue.active = true;
+    blue.timer = 0;
+    blue.maxDuration = 4.0; // Fair duration (was 5.5s)
+
+    // Spawn Blue with a fair offset (180px - 260px) away from player
+    // so the player is not instantly centered inside the singularity
+    const spawnAngle = Math.random() * Math.PI * 2;
+    const spawnDist = 190 + Math.random() * 70;
+    blue.x = Math.max(350, Math.min(this.camera.worldWidth - 350, this.player.x + Math.cos(spawnAngle) * spawnDist));
+    blue.y = Math.max(350, Math.min(this.camera.worldHeight - 350, this.player.y + Math.sin(spawnAngle) * spawnDist));
+    blue.absorbedDebris = [];
+
+    soundManager.playLapseBlue();
+    this.screenShake = 16;
+    this.damageNumbers.push({
+      id: Math.random().toString(),
+      text: '🌀 "AZUL: ROTACIÓN DEL RITUAL" 🌀 (¡CORRE O USA [K]!)',
+      x: blue.x,
+      y: blue.y - 45,
+      vy: -1.3,
+      color: '#38bdf8',
+      isBlackFlash: true,
+      life: 2.2,
+      maxLife: 2.2,
+      scale: 1.35,
+    });
+  }
+
+  // Gojo Technique 2: Rojo (Reversión del Ritual - Explosive Repulsion)
+  private triggerGojocatRed(sm: JujutsuSummon) {
+    sm.state = 'reversal_red';
+    sm.timer = 0;
+    const red = this.santiscat!.gojoTechniques.red;
+    red.active = true;
+    red.timer = 0;
+    red.x = sm.x + (sm.facing === 1 ? 50 : -50);
+    red.y = sm.y;
+    red.radius = 20;
+    red.repelledDebris = [];
+
+    soundManager.playReversalRed();
+    this.screenShake = 22;
+    this.damageNumbers.push({
+      id: Math.random().toString(),
+      text: '🔴 "ROJO: REVERSIÓN DEL RITUAL" 🔴',
+      x: red.x,
+      y: red.y - 45,
+      vy: -1.4,
+      color: '#ef4444',
+      isBlackFlash: true,
+      life: 2.0,
+      maxLife: 2.0,
+      scale: 1.35,
+    });
+  }
+
+  // Gojo Technique 3: Vacío Púrpura (Kyoshiki Murasaki - Giant One-Shot Spacetime Warping Sphere)
+  private triggerGojocatPurple(sm: JujutsuSummon) {
+    sm.state = 'purple_charge';
+    sm.timer = 0;
+    const purple = this.santiscat!.gojoTechniques.purple;
+    purple.active = true;
+    purple.phase = 'charging';
+    purple.timer = 0;
+    purple.x = sm.x;
+    purple.y = sm.y;
+    purple.fusionProgress = 0;
+    purple.trail = [];
+
+    soundManager.playMindControl();
+    this.damageNumbers.push({
+      id: Math.random().toString(),
+      text: '🟣 "TÉCNICA IMAGINARIA: VACÍO PÚRPURA" 🟣',
+      x: sm.x,
+      y: sm.y - 70,
+      vy: -1.5,
+      color: '#c084fc',
+      isBlackFlash: true,
+      life: 2.5,
+      maxLife: 2.5,
+      scale: 1.5,
+    });
+  }
+
+  // --- GOJO TECHNIQUES PHYSICS & COLLISION ---
+  private updateGojoTechniques(delta: number) {
+    if (!this.santiscat) return;
+    const gt = this.santiscat.gojoTechniques;
+
+    // 1. Azul (Lapse: Blue) - Everything attracted to singularity is destroyed
+    if (gt.blue.active) {
+      gt.blue.timer += delta;
+      const b = gt.blue;
+
+      // Gravitational attraction on player
+      const dx = b.x - this.player.x;
+      const dy = b.y - this.player.y;
+      const pDist = Math.hypot(dx, dy) || 1;
+
+      if (pDist < b.suctionRadius) {
+        // Fair, escapable gravitational suction:
+        // Base pull is scaled so player's movement speed (5.5 - 6.5) can actively overcome it and escape!
+        const distRatio = Math.max(0, 1 - pDist / b.suctionRadius);
+        let pullStr = Math.pow(distRatio, 1.35) * 2.8;
+
+        // Active movement detection: if player is steering/moving away, give escape resistance!
+        const isActivelyMoving = Boolean(
+          this.keys['keyw'] || this.keys['arrowup'] ||
+          this.keys['keys'] || this.keys['arrowdown'] ||
+          this.keys['keya'] || this.keys['arrowleft'] ||
+          this.keys['keyd'] || this.keys['arrowright'] ||
+          Math.hypot(this.player.vx, this.player.vy) > 0.8
+        );
+
+        if (isActivelyMoving) {
+          // Running away significantly reduces pull so player can cleanly escape
+          pullStr *= 0.65;
+        }
+
+        // Shield [K] stability: holding shield anchors the player against gravity suction!
+        const isShielding = Boolean(this.player.shieldActive || this.player.holdingShield || this.keys['keyk']);
+        if (isShielding) {
+          pullStr *= 0.3;
+        }
+
+        this.player.x += (dx / pDist) * pullStr;
+        this.player.y += (dy / pDist) * pullStr;
+
+        // If in core contact range:
+        if (pDist < b.radius + 15) {
+          if (isShielding) {
+            soundManager.playShieldDeflect();
+            this.spawnHitParticles(this.player.x, this.player.y, '#38bdf8', 6);
+          } else {
+            // Pulse damage with outward bounce so player is NEVER stuck inside core!
+            this.takePlayerDamage(16, 'collision');
+            this.spawnHitParticles(this.player.x, this.player.y, '#38bdf8', 12);
+            soundManager.playPunch();
+
+            const pushAngle = Math.atan2(this.player.y - b.y, this.player.x - b.x);
+            this.player.x += Math.cos(pushAngle) * 45;
+            this.player.y += Math.sin(pushAngle) * 45;
+          }
+        }
+      }
+
+      // Gravitational attraction & destruction of obstacles/debris
+      this.obstacles.forEach(obs => {
+        const ox = obs.x + obs.width / 2;
+        const oy = obs.y + obs.height / 2;
+        const odx = b.x - ox;
+        const ody = b.y - oy;
+        const oDist = Math.hypot(odx, ody) || 1;
+
+        if (oDist < b.suctionRadius) {
+          const oPull = (1 - oDist / b.suctionRadius) * 8.5;
+          obs.x += (odx / oDist) * oPull;
+          obs.y += (ody / oDist) * oPull;
+
+          // Destroyed if pulled into singularity
+          if (oDist < b.radius + 20) {
+            obs.hp = -999;
+            this.spawnHitParticles(ox, oy, '#38bdf8', 16);
+            soundManager.playPunch();
+
+            // Spawn flying suction debris that player can dodge or shield
+            for (let i = 0; i < 2; i++) {
+              const a = Math.random() * Math.PI * 2;
+              const spd = 7 + Math.random() * 5;
+              b.absorbedDebris.push({
+                id: Math.random().toString(),
+                x: b.x,
+                y: b.y,
+                vx: Math.cos(a) * spd,
+                vy: Math.sin(a) * spd,
+                radius: 8 + Math.random() * 6,
+                color: obs.color || '#38bdf8',
+                angle: Math.random() * Math.PI,
+                rotationSpeed: 4,
+                life: 1.4,
+              });
+            }
+          }
+        }
+      });
+      this.obstacles = this.obstacles.filter(o => o.hp > 0);
+
+      // Update flying suction debris & check collision with player
+      b.absorbedDebris.forEach(deb => {
+        deb.life -= delta;
+        deb.x += deb.vx * delta * 60;
+        deb.y += deb.vy * delta * 60;
+        const dist = Math.hypot(this.player.x - deb.x, this.player.y - deb.y);
+        if (dist < this.player.width * 0.45 + deb.radius) {
+          if (this.player.shieldActive || this.player.holdingShield || this.keys['keyk']) {
+            soundManager.playShieldDeflect();
+            this.spawnHitParticles(deb.x, deb.y, '#38bdf8', 6);
+          } else {
+            this.takePlayerDamage(16, 'collision');
+          }
+          deb.life = 0;
+        }
+      });
+      b.absorbedDebris = b.absorbedDebris.filter(d => d.life > 0);
+
+      if (b.timer >= b.maxDuration) {
+        b.active = false;
+        b.absorbedDebris = [];
+      }
+    }
+
+    // 2. Rojo (Reversal: Red) - Everything repelled with extreme force & destroyed
+    if (gt.red.active) {
+      gt.red.timer += delta;
+      const r = gt.red;
+      r.radius = Math.min(r.maxRadius, r.radius + delta * 240);
+
+      // Extreme repulsion force pushing player
+      const dx = this.player.x - r.x;
+      const dy = this.player.y - r.y;
+      const pDist = Math.hypot(dx, dy) || 1;
+
+      if (pDist < r.radius + 30) {
+        const repelForce = 14;
+        this.player.x += (dx / pDist) * repelForce;
+        this.player.y += (dy / pDist) * repelForce;
+        this.takePlayerDamage(25 * delta * 5, 'collision');
+        this.spawnHitParticles(this.player.x, this.player.y, '#ef4444', 4);
+      }
+
+      // Repelling and shattering obstacles into flying debris
+      this.obstacles.forEach(obs => {
+        const ox = obs.x + obs.width / 2;
+        const oy = obs.y + obs.height / 2;
+        const odx = ox - r.x;
+        const ody = oy - r.y;
+        const oDist = Math.hypot(odx, ody) || 1;
+
+        if (oDist < r.radius) {
+          obs.hp = -999;
+          this.spawnHitParticles(ox, oy, '#ef4444', 16);
+          // Spawn flying blast debris
+          for (let i = 0; i < 3; i++) {
+            const a = Math.atan2(ody, odx) + (Math.random() - 0.5) * 0.8;
+            const spd = 11 + Math.random() * 6;
+            r.repelledDebris.push({
+              id: Math.random().toString(),
+              x: ox,
+              y: oy,
+              vx: Math.cos(a) * spd,
+              vy: Math.sin(a) * spd,
+              radius: 9 + Math.random() * 6,
+              color: '#ef4444',
+              angle: Math.random() * Math.PI,
+              rotationSpeed: 6,
+              life: 1.8,
+            });
+          }
+        }
+      });
+      this.obstacles = this.obstacles.filter(o => o.hp > 0);
+
+      // Update repelled debris
+      r.repelledDebris.forEach(deb => {
+        deb.life -= delta;
+        deb.x += deb.vx * delta * 60;
+        deb.y += deb.vy * delta * 60;
+        const dist = Math.hypot(this.player.x - deb.x, this.player.y - deb.y);
+        if (dist < this.player.width * 0.45 + deb.radius) {
+          this.takePlayerDamage(26, 'collision');
+          deb.life = 0;
+        }
+      });
+      r.repelledDebris = r.repelledDebris.filter(d => d.life > 0);
+
+      if (r.timer >= r.maxDuration) {
+        r.active = false;
+        r.repelledDebris = [];
+      }
+    }
+
+    // 3. Vacío Púrpura (Hollow Technique: Purple) - Giant One-Shot Projectile with Spacetime Distortion
+    if (gt.purple.active && gt.purple.phase === 'fired') {
+      const pur = gt.purple;
+      pur.timer += delta;
+      pur.x += pur.vx * delta * 60;
+      pur.y += pur.vy * delta * 60;
+
+      // Particle trail
+      pur.trail.unshift({ x: pur.x, y: pur.y, alpha: 1.0, size: pur.radius });
+      if (pur.trail.length > 10) pur.trail.pop();
+
+      // Screen tremor along trajectory
+      this.screenShake = Math.max(this.screenShake, 14);
+
+      // Vaporize all obstacles in path
+      this.obstacles.forEach(obs => {
+        const ox = obs.x + obs.width / 2;
+        const oy = obs.y + obs.height / 2;
+        if (Math.hypot(pur.x - ox, pur.y - oy) < pur.radius + obs.width / 2) {
+          obs.hp = -999;
+          this.spawnHitParticles(ox, oy, '#c084fc', 20);
+          this.spawnHitParticles(ox, oy, '#38bdf8', 15);
+        }
+      });
+      this.obstacles = this.obstacles.filter(o => o.hp > 0);
+
+      // Collision check with player: ONE-SHOT KILL!
+      const pDist = Math.hypot(this.player.x - pur.x, this.player.y - pur.y);
+      if (pDist < this.player.width * 0.45 + pur.radius * 0.85) {
+        if (!this.godMode) {
+          soundManager.playHollowPurple();
+          this.screenShake = 36;
+          this.stats.deathReason = 'reality_tear';
+          this.takePlayerDamage(99999, 'collision');
+          pur.active = false;
+          pur.phase = 'exploded';
+          return;
+        }
+      }
+
+      if (pur.timer >= pur.maxDuration) {
+        pur.active = false;
+        pur.phase = 'exploded';
+      }
+    }
+  }
+
+  // --- DAMAGE SUMMONS ---
+  public applyDamageToSummon(sm: JujutsuSummon, baseDmg: number, attackType: AttackType, hitX: number, hitY: number) {
+    const questMult = this.getDamageMultiplier('santiscat', attackType);
+    const modifiedBaseDmg = Math.round(baseDmg * questMult);
+    const { damage, isBlackFlash } = this.rollBlackFlash(modifiedBaseDmg, hitX, hitY);
+    sm.hp = Math.max(0, sm.hp - damage);
+    this.stats.totalAttacksLanded++;
+    this.stats.score += damage * 2;
+    this.progressQuest('jujutsu_cleanser', damage);
+
+    const isEmpowered = questMult > 1.05;
+    this.damageNumbers.push({
+      id: Math.random().toString(),
+      text: isBlackFlash ? `💥 BLACK FLASH! -${damage}` : (isEmpowered ? `-${damage} ⚡` : `-${damage}`),
+      x: hitX,
+      y: hitY - 14,
+      vy: -1.6,
+      color: sm.id === 'sukunacat' ? '#f43f5e' : '#38bdf8',
+      isBlackFlash,
+      life: 1.0,
+      maxLife: 1.0,
+      scale: isBlackFlash ? 1.4 : 1.1,
+    });
+
+    this.spawnHitParticles(hitX, hitY, sm.id === 'sukunacat' ? '#dc2626' : '#38bdf8', 12);
+
+    if (sm.hp <= 0) {
+      soundManager.playExplosion();
+      this.screenShake = 18;
+      this.spawnRubble(sm.x, sm.y, sm.id === 'sukunacat' ? '#7f1d1d' : '#0369a1', 25);
+      this.progressQuest('jujutsu_cleanser', 500);
+      sm.active = false;
+
+      // Resurrect / re-summon after 16 seconds
+      setTimeout(() => {
+        if (this.santiscat && this.stage === 'santiscat_boss') {
+          sm.active = true;
+          sm.maxHp = 12000;
+          sm.hp = sm.maxHp;
+          sm.state = 'idle';
+          sm.cooldownTimer = 1.2;
+        }
+      }, 16000);
+    }
+  }
+
+  public testSummonJujutsuCats() {
+    if (this.stage !== 'santiscat_boss') {
+      this.startStage('santiscat_boss');
+    }
+    if (this.santiscat) {
+      this.santiscat.jujutsuSummons.forEach(sm => {
+        sm.maxHp = 12000;
+        sm.hp = sm.maxHp;
+        sm.cooldownTimer = sm.id === 'sukunacat' ? 0.8 : 3.2;
+      });
+      this.triggerSantiscatAttack('summon_jujutsu_cats');
     }
   }
 }

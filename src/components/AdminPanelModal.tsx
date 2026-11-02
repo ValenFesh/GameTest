@@ -479,6 +479,114 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                   🐱 1-SHOT SANTISCAT
                 </button>
               </div>
+
+              {/* Instant Summon Sukunacat & Gojocat */}
+              <div className="p-3.5 bg-neutral-950/80 border border-fuchsia-500/40 rounded-2xl flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-fuchsia-500/15 border border-fuchsia-500/50 flex items-center justify-center text-fuchsia-400">
+                    <Sparkles className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <div className="text-xs font-black text-white">INVOCAR SUKUNACAT & GOJOCAT (JUJUTSU)</div>
+                    <div className="text-[11px] text-neutral-400">
+                      Transporta a la batalla contra Santiscat y desata a Sukunacat (Templo del Mal) y Gojocat (Vacío Púrpura).
+                    </div>
+                  </div>
+                </div>
+
+                <button
+                  onClick={() => {
+                    if (engine) {
+                      engine.testSummonJujutsuCats();
+                      showToast('🔥 ¡Sukunacat y Gojocat invocados!');
+                    }
+                  }}
+                  className="px-4 py-2 rounded-xl bg-gradient-to-r from-fuchsia-600 to-red-600 hover:from-fuchsia-500 hover:to-red-500 text-white font-black text-xs transition-all shadow-md active:scale-95 cursor-pointer"
+                >
+                  ⛩️ INVOCAR JUJUTSU
+                </button>
+              </div>
+
+              {/* Instant Test Phase 2 (Souls & Wormhole) */}
+              <div className="p-3.5 bg-neutral-950/80 border border-purple-500/50 rounded-2xl flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-purple-500/20 border border-purple-500/60 flex items-center justify-center text-purple-400 font-black">
+                    🌀
+                  </div>
+                  <div>
+                    <div className="text-xs font-black text-white">ACTIVAR FASE 2: 12 ALMAS Y AGUJERO DE GUSANO (99,999 HP)</div>
+                    <div className="text-[11px] text-neutral-400">
+                      Inicia la cinemática de absorción de las 12 almas humanas e ingresa al túnel fractal psicodélico.
+                    </div>
+                  </div>
+                </div>
+
+                <button
+                  onClick={() => {
+                    if (engine) {
+                      engine.testSantiscatPhase2();
+                      showToast('🌀 ¡Fase 2 de Santiscat activada!');
+                    }
+                  }}
+                  className="px-4 py-2 rounded-xl bg-gradient-to-r from-purple-600 via-pink-600 to-cyan-500 hover:opacity-90 text-white font-black text-xs transition-all shadow-md active:scale-95 cursor-pointer"
+                >
+                  🌀 FASE 2 (ALMAS)
+                </button>
+              </div>
+
+              {/* Instant Test Phase 2.5 (Another Universe & Refused to Die) */}
+              <div className="p-3.5 bg-neutral-950/80 border border-red-500/50 rounded-2xl flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-red-500/20 border border-red-500/60 flex items-center justify-center text-red-400 font-black">
+                    ❤️
+                  </div>
+                  <div>
+                    <div className="text-xs font-black text-white">ACTIVAR FASE 2.5: OTRO UNIVERSO & REHÚSATE A MORIR</div>
+                    <div className="text-[11px] text-neutral-400">
+                      Entra directamente a la arena cósmica donde el jugador se rehúsa a morir al recibir daño letal.
+                    </div>
+                  </div>
+                </div>
+
+                <button
+                  onClick={() => {
+                    if (engine) {
+                      engine.testSantiscatPhase25();
+                      showToast('🌌 ¡Fase 2.5 Otro Universo activada!');
+                    }
+                  }}
+                  className="px-4 py-2 rounded-xl bg-gradient-to-r from-red-600 to-amber-500 hover:opacity-90 text-white font-black text-xs transition-all shadow-md active:scale-95 cursor-pointer"
+                >
+                  🌌 FASE 2.5
+                </button>
+              </div>
+
+              {/* Instant Test Final Defeat Cinematic */}
+              <div className="p-3.5 bg-neutral-950/80 border border-amber-500/50 rounded-2xl flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-amber-500/20 border border-amber-500/60 flex items-center justify-center text-amber-400 font-black">
+                    💥
+                  </div>
+                  <div>
+                    <div className="text-xs font-black text-white">CINEMÁTICA FINAL: DERROTA DE SANTISCAT</div>
+                    <div className="text-[11px] text-neutral-400">
+                      Luz celestial brillante, liberación de 12 almas, implosión procedural WebGL y supernova gigantesca.
+                    </div>
+                  </div>
+                </div>
+
+                <button
+                  onClick={() => {
+                    if (engine) {
+                      engine.testSantiscatDefeatCinematic();
+                      showToast('💥 ¡Cinemática de derrota de Santiscat iniciada!');
+                    }
+                  }}
+                  className="px-4 py-2 rounded-xl bg-gradient-to-r from-amber-500 via-rose-500 to-purple-600 hover:opacity-90 text-white font-black text-xs transition-all shadow-md active:scale-95 cursor-pointer"
+                >
+                  💥 CINEMÁTICA FINAL
+                </button>
+              </div>
             </div>
           )}
 
@@ -528,8 +636,18 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                   },
                   {
                     id: 'santiscat_boss' as GameStage,
-                    title: '🐱 Nivel 4: Boss Santiscat',
-                    desc: 'Batalla cósmica con Sol, Agujero Negro, Shaders y fuego 1-Shot.',
+                    title: '🐱 Santiscat Fase 1 (15,000 HP)',
+                    desc: 'Sol, Agujero Negro, Sukunacat y Gojocat.',
+                  },
+                  {
+                    id: 'santiscat_boss_wormhole' as GameStage,
+                    title: '🌀 Santiscat Fase 2: Agujero de Gusano (99,999 HP)',
+                    desc: '12 Almas humanas, túnel fractal, blast arcoíris y Omega Save/Load.',
+                  },
+                  {
+                    id: 'santiscat_boss_universe' as GameStage,
+                    title: '🌌 Santiscat Fase 2.5: Otro Universo',
+                    desc: 'Combate final por la vida donde el jugador se rehúsa a morir.',
                   },
                 ].map((s) => (
                   <button

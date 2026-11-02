@@ -22,11 +22,11 @@ interface AudioSettingsModalProps {
   currentStage: string;
 }
 
-type AudioTab = 'city' | 'space' | 'boss' | 'gamma';
+type AudioTab = 'city' | 'space' | 'boss' | 'santiscat' | 'gamma';
 
 export const AudioSettingsModal: React.FC<AudioSettingsModalProps> = ({ isOpen, onClose, currentStage }) => {
   const [activeTab, setActiveTab] = useState<AudioTab>(
-    currentStage === 'space' ? 'space' : currentStage === 'boss' ? 'boss' : 'city'
+    currentStage === 'space' ? 'space' : currentStage === 'boss' ? 'boss' : currentStage === 'santiscat_boss' ? 'santiscat' : 'city'
   );
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [feedbackMsg, setFeedbackMsg] = useState<string | null>(null);
@@ -40,8 +40,8 @@ export const AudioSettingsModal: React.FC<AudioSettingsModalProps> = ({ isOpen, 
   const handleClose = () => {
     if (isPlayingTest) {
       soundManager.stopGammaSound();
-      if (currentStage === 'city' || currentStage === 'space' || currentStage === 'boss') {
-        soundManager.playMusic(currentStage as 'city' | 'space' | 'boss');
+      if (currentStage === 'city' || currentStage === 'space' || currentStage === 'boss' || currentStage === 'distorted' || currentStage === 'santiscat_boss') {
+        soundManager.playMusic(currentStage === 'santiscat_boss' ? 'santiscat' : currentStage as 'city' | 'space' | 'boss' | 'distorted');
       } else {
         soundManager.stopMusic();
       }
@@ -68,7 +68,8 @@ export const AudioSettingsModal: React.FC<AudioSettingsModalProps> = ({ isOpen, 
       const tabNames: Record<AudioTab, string> = {
         city: 'Nivel 1 (Ciudad)',
         space: 'Nivel 2 (Espacio)',
-        boss: 'Jefe Final (Nanovalen)',
+        boss: 'Jefe (Nanovalen)',
+        santiscat: 'Jefe (Santiscat)',
         gamma: 'Estallido Gamma',
       };
       triggerRefresh(`¡Canción "${file.name}" cargada para ${tabNames[activeTab]}!`);
@@ -162,11 +163,11 @@ export const AudioSettingsModal: React.FC<AudioSettingsModalProps> = ({ isOpen, 
           </div>
         )}
 
-        {/* Tabs for Levels, Boss, and Gamma Sound */}
-        <div className="grid grid-cols-4 gap-1.5 p-1 bg-neutral-950 rounded-2xl border border-neutral-800 mb-5">
+        {/* Tabs for Levels, Bosses, and Gamma Sound */}
+        <div className="grid grid-cols-5 gap-1 p-1 bg-neutral-950 rounded-2xl border border-neutral-800 mb-5">
           <button
             onClick={() => handleTabChange('city')}
-            className={`flex flex-col items-center justify-center py-2 px-1 rounded-xl text-[11px] font-bold transition-all cursor-pointer ${
+            className={`flex flex-col items-center justify-center py-2 px-1 rounded-xl text-[10px] font-bold transition-all cursor-pointer ${
               activeTab === 'city'
                 ? 'bg-amber-500 text-neutral-950 shadow-md font-black'
                 : 'text-neutral-400 hover:text-white hover:bg-neutral-800/50'
@@ -178,7 +179,7 @@ export const AudioSettingsModal: React.FC<AudioSettingsModalProps> = ({ isOpen, 
 
           <button
             onClick={() => handleTabChange('space')}
-            className={`flex flex-col items-center justify-center py-2 px-1 rounded-xl text-[11px] font-bold transition-all cursor-pointer ${
+            className={`flex flex-col items-center justify-center py-2 px-1 rounded-xl text-[10px] font-bold transition-all cursor-pointer ${
               activeTab === 'space'
                 ? 'bg-cyan-500 text-neutral-950 shadow-md font-black'
                 : 'text-neutral-400 hover:text-white hover:bg-neutral-800/50'
@@ -190,26 +191,38 @@ export const AudioSettingsModal: React.FC<AudioSettingsModalProps> = ({ isOpen, 
 
           <button
             onClick={() => handleTabChange('boss')}
-            className={`flex flex-col items-center justify-center py-2 px-1 rounded-xl text-[11px] font-bold transition-all cursor-pointer ${
+            className={`flex flex-col items-center justify-center py-2 px-1 rounded-xl text-[10px] font-bold transition-all cursor-pointer ${
               activeTab === 'boss'
                 ? 'bg-red-500 text-neutral-950 shadow-md font-black'
                 : 'text-neutral-400 hover:text-white hover:bg-neutral-800/50'
             }`}
           >
             <Skull className="w-4 h-4 mb-0.5" />
-            <span>Jefe Final</span>
+            <span>Nanovalen</span>
+          </button>
+
+          <button
+            onClick={() => handleTabChange('santiscat')}
+            className={`flex flex-col items-center justify-center py-2 px-1 rounded-xl text-[10px] font-bold transition-all cursor-pointer ${
+              activeTab === 'santiscat'
+                ? 'bg-purple-500 text-white shadow-md font-black'
+                : 'text-neutral-400 hover:text-white hover:bg-neutral-800/50'
+            }`}
+          >
+            <Sparkles className="w-4 h-4 mb-0.5 text-purple-300" />
+            <span>Santiscat</span>
           </button>
 
           <button
             onClick={() => handleTabChange('gamma')}
-            className={`flex flex-col items-center justify-center py-2 px-1 rounded-xl text-[11px] font-bold transition-all cursor-pointer ${
+            className={`flex flex-col items-center justify-center py-2 px-1 rounded-xl text-[10px] font-bold transition-all cursor-pointer ${
               activeTab === 'gamma'
                 ? 'bg-fuchsia-500 text-neutral-950 shadow-md font-black'
                 : 'text-neutral-400 hover:text-white hover:bg-neutral-800/50'
             }`}
           >
             <Zap className="w-4 h-4 mb-0.5" />
-            <span>Rayo Gamma</span>
+            <span>Gamma</span>
           </button>
         </div>
 

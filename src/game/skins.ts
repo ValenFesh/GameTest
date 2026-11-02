@@ -104,7 +104,7 @@ export const CHARACTER_SKINS: Record<CharacterSkinId, CharacterSkin> = {
     name: 'Catvalentina',
     title: 'Gata Gris Claro · Haz Esmeralda',
     species: 'gata',
-    requiredWins: 2,
+    requiredWins: 0,
     description: 'Tiene 200 de vida, escudo celeste y su poder supremo: un rayo verde devastador que carga durante 4 segundos inmóvil.',
     maxHp: 200,
     moveSpeed: 6.5,
@@ -168,7 +168,7 @@ export const CHARACTER_SKINS: Record<CharacterSkinId, CharacterSkin> = {
     name: 'Laura',
     title: 'Gato Negro con Blanco · Control Psiónico',
     species: 'gato',
-    requiredWins: 5,
+    requiredWins: 0,
     description: 'Elegante felino con poderes de control mental. Puede obligar a Nanovalen a golpearse solo o romper su escudo protector instantáneamente.',
     maxHp: 130,
     moveSpeed: 7.2,
@@ -223,7 +223,7 @@ export const CHARACTER_SKINS: Record<CharacterSkinId, CharacterSkin> = {
     name: 'Zulmo',
     title: 'Gato Blanco con Manchas · Heraldo de Luz',
     species: 'gato',
-    requiredWins: 10,
+    requiredWins: 0,
     description: 'Capaz de acelerar a una velocidad muy superior al resto de los gatos (+50%). Posee un radiante escudo amarillo y un láser lumínico amarillo de impacto instantáneo.',
     maxHp: 130,
     moveSpeed: 9.8, // Much faster than base 6.5
@@ -278,7 +278,7 @@ export const CHARACTER_SKINS: Record<CharacterSkinId, CharacterSkin> = {
     name: 'Marta',
     title: 'Gata Azul Clarito con Manchas · Magia Verde y Vida',
     species: 'gata',
-    requiredWins: 20,
+    requiredWins: 0,
     description: 'Especialista en magia verde ancestral, regeneración constante de salud (+2.5 HP/s), 15 curaciones potenciadas y esferas místicas de energía teledirigidas.',
     maxHp: 160,
     moveSpeed: 7.2,
@@ -324,7 +324,7 @@ export const CHARACTER_SKINS: Record<CharacterSkinId, CharacterSkin> = {
     name: 'Fermin',
     title: 'Perro Rubio · Creación de Materia y Energía',
     species: 'perro',
-    requiredWins: 25,
+    requiredWins: 0,
     description: 'Adorable y poderoso canino rubio. Tiene el poder de crear objetos de la nada con energía: yunques colosales que aplastan y espadas flotantes.',
     maxHp: 170,
     moveSpeed: 7.4,
@@ -379,7 +379,7 @@ export const CHARACTER_SKINS: Record<CharacterSkinId, CharacterSkin> = {
     name: 'Tina',
     title: 'Perro Marrón · Señora del Tiempo y Teletransporte',
     species: 'perro',
-    requiredWins: 50,
+    requiredWins: 0,
     description: 'El perro definitivo de cronos. Puede detener el tiempo por completo (pausando a Nanovalen y todo el entorno mientras él sigue atacando), teletransportarse y moverse con máxima rapidez.',
     maxHp: 180,
     moveSpeed: 10.2, // Highest speed!
@@ -499,11 +499,6 @@ export function saveSelectedSkin(skinId: CharacterSkinId): void {
   }
 }
 
-export function isSkinUnlocked(skinId: CharacterSkinId, currentWins: number, adminUnlocked?: boolean): boolean {
-  if (adminUnlocked || getAdminUnlockAll()) {
-    return true;
-  }
-  const skin = CHARACTER_SKINS[skinId];
-  if (!skin) return false;
-  return currentWins >= skin.requiredWins;
+export function isSkinUnlocked(_skinId: CharacterSkinId, _currentWins?: number, _adminUnlocked?: boolean): boolean {
+  return true; // All skins are completely free for all players!
 }
