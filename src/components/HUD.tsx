@@ -621,6 +621,66 @@ export const HUD: React.FC<HUDProps> = ({
               </div>
             </div>
           )}
+
+          {/* Level 4 Finale: Cosmic Escape & Universe Collapse */}
+          {stage === 'cosmic_escape' && engine.cosmicEscape && (
+            <div
+              className={`bg-neutral-950/95 backdrop-blur-md border-2 rounded-2xl p-3 shadow-2xl text-center transition-all ${
+                engine.cosmicEscape.timer < 15.0
+                  ? 'border-red-500 shadow-red-900/50 animate-pulse'
+                  : 'border-fuchsia-500 shadow-purple-900/40'
+              }`}
+            >
+              <div className="flex justify-between items-center text-xs font-black mb-1">
+                <span className="text-transparent bg-clip-text bg-gradient-to-r from-red-400 via-amber-300 to-fuchsia-400 font-display text-sm tracking-wider flex items-center gap-1.5">
+                  <span className="animate-spin text-base">🌀</span>
+                  <span>¡HUIDA CÓSMICA DEL COLAPSO UNIVERSAL!</span>
+                </span>
+                <span
+                  className={`px-2.5 py-0.5 rounded-full font-mono font-black text-sm border ${
+                    engine.cosmicEscape.timer < 15.0
+                      ? 'bg-red-600/30 text-red-300 border-red-500 animate-pulse'
+                      : 'bg-amber-500/20 text-amber-300 border-amber-400'
+                  }`}
+                >
+                  ⏱️ {Math.max(0, engine.cosmicEscape.timer).toFixed(1)}s
+                </span>
+              </div>
+
+              {/* Escape Distance Progress Bar */}
+              {(() => {
+                const totalDist = 12800 - 400; // wormholeX - startX
+                const currentDist = Math.max(0, Math.min(totalDist, player.x - 400));
+                const escapePercent = Math.min(100, Math.max(0, (currentDist / totalDist) * 100));
+                const remainingMeters = Math.max(0, Math.round(12800 - player.x));
+
+                return (
+                  <div className="w-full mt-1">
+                    <div className="flex justify-between items-center text-[10px] font-bold text-neutral-300 mb-0.5">
+                      <span className="text-cyan-300 flex items-center gap-1">
+                        🏃 DISTANCIA: {Math.round(escapePercent)}% ({Math.round(player.x)}m / 12,800m)
+                      </span>
+                      <span className="text-fuchsia-300">
+                        {remainingMeters === 0 ? '¡CRUZANDO AGUJERO DE GUSANO!' : `Restan: ${remainingMeters}m ➔ 🌀`}
+                      </span>
+                    </div>
+                    <div className="w-full h-3 bg-neutral-900 rounded-full border border-neutral-700 overflow-hidden relative">
+                      <div
+                        className="h-full bg-gradient-to-r from-amber-500 via-fuchsia-500 to-cyan-400 rounded-full transition-all duration-100"
+                        style={{ width: `${escapePercent}%` }}
+                      />
+                    </div>
+                  </div>
+                );
+              })()}
+
+              <div className="flex items-center justify-center gap-2 mt-1.5 text-[11px] font-bold">
+                <span className="text-amber-300 flex items-center gap-1 bg-amber-950/60 px-2.5 py-0.5 rounded-full border border-amber-500/40">
+                  🛡️ ¡Usa tu Escudo (Shift / K) para anular cataclismos y supernovas!
+                </span>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Right Corner: Black Flash Counter & Audio */}

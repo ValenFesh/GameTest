@@ -990,7 +990,7 @@ class SoundManager {
     return this.hasCustomTrack('city');
   }
 
-  public playMusic(track: 'city' | 'space' | 'boss' | 'distorted' | 'santiscat' | 'santiscat_phase2' | 'santiscat_phase25' | 'domain_expansion' | 'none') {
+  public playMusic(track: 'city' | 'space' | 'boss' | 'distorted' | 'santiscat' | 'santiscat_phase2' | 'santiscat_phase25' | 'domain_expansion' | 'cosmic_escape' | 'none') {
     if (this.currentTrack === track) return;
     this.currentTrack = track;
     this.stopMusic();
@@ -1024,9 +1024,9 @@ class SoundManager {
     if (!this.ctx || !this.musicGain) return;
 
     let step = 0;
-    // City Level 1 (118 BPM), Santiscat Boss (146 BPM), Domain Expansion (152 BPM), Santiscat Phase 2 Wormhole (166 BPM), Phase 2.5 Another Universe (178 BPM)
-    const bpm = track === 'city' ? 118 : track === 'santiscat' ? 146 : track === 'santiscat_phase25' ? 178 : track === 'santiscat_phase2' ? 166 : track === 'domain_expansion' ? 152 : track === 'boss' ? 140 : 100;
-    const intervalMs = (track === 'city' || track === 'santiscat' || track === 'domain_expansion' || track === 'santiscat_phase2' || track === 'santiscat_phase25') ? (60 / bpm) * 1000 * 0.25 : (60 / bpm) * 1000 * 0.5;
+    // City Level 1 (118 BPM), Santiscat Boss (146 BPM), Domain Expansion (152 BPM), Santiscat Phase 2 Wormhole (166 BPM), Phase 2.5 Another Universe (178 BPM), Cosmic Escape (176 BPM)
+    const bpm = track === 'city' ? 118 : track === 'santiscat' ? 146 : track === 'santiscat_phase25' ? 178 : track === 'cosmic_escape' ? 176 : track === 'santiscat_phase2' ? 166 : track === 'domain_expansion' ? 152 : track === 'boss' ? 140 : 100;
+    const intervalMs = (track === 'city' || track === 'santiscat' || track === 'domain_expansion' || track === 'santiscat_phase2' || track === 'santiscat_phase25' || track === 'cosmic_escape') ? (60 / bpm) * 1000 * 0.25 : (60 / bpm) * 1000 * 0.5;
 
     // Scales for other tracks
     const scales = {
@@ -1529,6 +1529,115 @@ class SoundManager {
             subLeadGain.connect(this.musicGain);
             subLead.start(now);
             subLead.stop(now + 0.19);
+          }
+        }
+
+      } else if (track === 'cosmic_escape') {
+        // --- COSMIC ESCAPE: EPIC FINAL HIGH-STAKES RUN (176 BPM, D MINOR) ---
+        const e16 = step % 16;
+        const bar = Math.floor(step / 16) % 4;
+
+        // 1. Heavy Driving Kick Drum (Four-on-the-floor + urgent syncopated gallop)
+        if (e16 % 4 === 0 || e16 === 6 || e16 === 10 || e16 === 14) {
+          const kickOsc = this.ctx.createOscillator();
+          const kickGain = this.ctx.createGain();
+          kickOsc.type = 'sine';
+          kickOsc.frequency.setValueAtTime(155, now);
+          kickOsc.frequency.exponentialRampToValueAtTime(28, now + 0.11);
+          kickGain.gain.setValueAtTime(0.55, now);
+          kickGain.gain.exponentialRampToValueAtTime(0.005, now + 0.12);
+          kickOsc.connect(kickGain);
+          kickGain.connect(this.musicGain);
+          kickOsc.start(now);
+          kickOsc.stop(now + 0.125);
+        }
+
+        // 2. High-energy Gated Snare on beats 2 & 4
+        if (e16 === 4 || e16 === 12) {
+          const snareOsc = this.ctx.createOscillator();
+          const snareGain = this.ctx.createGain();
+          snareOsc.type = 'triangle';
+          snareOsc.frequency.setValueAtTime(280, now);
+          snareOsc.frequency.exponentialRampToValueAtTime(80, now + 0.14);
+          snareGain.gain.setValueAtTime(0.38, now);
+          snareGain.gain.exponentialRampToValueAtTime(0.01, now + 0.15);
+          snareOsc.connect(snareGain);
+          snareGain.connect(this.musicGain);
+          snareOsc.start(now);
+          snareOsc.stop(now + 0.155);
+        }
+
+        // 3. Relentless Hi-Hat Rush
+        const hatOsc = this.ctx.createOscillator();
+        const hatGain = this.ctx.createGain();
+        hatOsc.type = 'square';
+        hatOsc.frequency.setValueAtTime(e16 % 2 === 0 ? 9200 : 7600, now);
+        hatGain.gain.setValueAtTime(e16 % 4 === 2 ? 0.08 : 0.03, now);
+        hatGain.gain.exponentialRampToValueAtTime(0.001, now + 0.04);
+        hatOsc.connect(hatGain);
+        hatGain.connect(this.musicGain);
+        hatOsc.start(now);
+        hatOsc.stop(now + 0.045);
+
+        // 4. Fast Driving Synth Bass (D minor -> Bb -> C -> A)
+        const escapeBass = [
+          // D minor
+          [73.42, 146.83, 110.00, 146.83, 73.42, 146.83, 110.00, 146.83, 73.42, 146.83, 110.00, 146.83, 87.31, 146.83, 110.00, 73.42],
+          // Bb Major
+          [58.27, 116.54, 87.31, 116.54, 58.27, 116.54, 87.31, 116.54, 58.27, 116.54, 87.31, 116.54, 69.30, 116.54, 87.31, 58.27],
+          // C Major
+          [65.41, 130.81, 98.00, 130.81, 65.41, 130.81, 98.00, 130.81, 65.41, 130.81, 98.00, 130.81, 77.78, 130.81, 98.00, 65.41],
+          // A minor / A7
+          [55.00, 110.00, 82.41, 110.00, 55.00, 110.00, 82.41, 110.00, 55.00, 110.00, 82.41, 110.00, 65.41, 110.00, 82.41, 55.00],
+        ];
+        const bFreq = escapeBass[bar][e16];
+        const bassOsc = this.ctx.createOscillator();
+        const bassGain = this.ctx.createGain();
+        bassOsc.type = 'sawtooth';
+        bassOsc.frequency.setValueAtTime(bFreq, now);
+        bassGain.gain.setValueAtTime(0.25, now);
+        bassGain.gain.exponentialRampToValueAtTime(0.01, now + 0.11);
+        bassOsc.connect(bassGain);
+        bassGain.connect(this.musicGain);
+        bassOsc.start(now);
+        bassOsc.stop(now + 0.12);
+
+        // 5. Epic Heroic Brass/Synth Lead (High Octane Finale Melodic Progression)
+        const escapeMelody = [
+          // Bar 0: D minor heroic rise (D4 - F4 - A4 - D5)
+          [293.66, 0, 349.23, 0, 440.00, 0, 523.25, 587.33, 0, 587.33, 523.25, 0, 440.00, 349.23, 293.66, 0],
+          // Bar 1: Bb surge (Bb4 - D5 - F5)
+          [466.16, 0, 523.25, 0, 587.33, 0, 698.46, 698.46, 0, 659.25, 587.33, 0, 523.25, 466.16, 440.00, 0],
+          // Bar 2: C resolution (C5 - E5 - G5)
+          [523.25, 0, 587.33, 0, 659.25, 0, 783.99, 783.99, 0, 698.46, 659.25, 0, 587.33, 523.25, 466.16, 0],
+          // Bar 3: Dramatic climax (A5 - G5 - F5 - E5 -> High D6!)
+          [880.00, 0, 783.99, 0, 698.46, 659.25, 587.33, 659.25, 698.46, 783.99, 880.00, 1046.50, 1174.66, 0, 1046.50, 880.00],
+        ];
+        const mFreq = escapeMelody[bar][e16];
+        if (mFreq > 0) {
+          const leadOsc = this.ctx.createOscillator();
+          const leadGain = this.ctx.createGain();
+          leadOsc.type = 'sawtooth';
+          leadOsc.frequency.setValueAtTime(mFreq, now);
+          leadGain.gain.setValueAtTime(0.24, now);
+          leadGain.gain.exponentialRampToValueAtTime(0.01, now + 0.15);
+          leadOsc.connect(leadGain);
+          leadGain.connect(this.musicGain);
+          leadOsc.start(now);
+          leadOsc.stop(now + 0.16);
+
+          // Sub-octave warm body
+          if (e16 % 2 === 0) {
+            const subL = this.ctx.createOscillator();
+            const subLGain = this.ctx.createGain();
+            subL.type = 'triangle';
+            subL.frequency.setValueAtTime(mFreq * 0.5, now);
+            subLGain.gain.setValueAtTime(0.12, now);
+            subLGain.gain.exponentialRampToValueAtTime(0.005, now + 0.16);
+            subL.connect(subLGain);
+            subLGain.connect(this.musicGain);
+            subL.start(now);
+            subL.stop(now + 0.17);
           }
         }
 
@@ -2473,6 +2582,145 @@ class SoundManager {
 
     sub.start(now);
     sub.stop(now + 0.65);
+  }
+
+  public playEscapeWarningAlarm() {
+    if (this.isMuted) return;
+    this.initContext();
+    if (!this.ctx || !this.sfxGain) return;
+    const now = this.ctx.currentTime;
+
+    // Dual-tone urgent alert klaxon (880Hz / 1320Hz oscillating alarm)
+    for (let i = 0; i < 3; i++) {
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      const t = now + i * 0.32;
+
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(880, t);
+      osc.frequency.linearRampToValueAtTime(1320, t + 0.16);
+      osc.frequency.linearRampToValueAtTime(740, t + 0.30);
+
+      gain.gain.setValueAtTime(0.4, t);
+      gain.gain.exponentialRampToValueAtTime(0.01, t + 0.30);
+
+      osc.connect(gain);
+      gain.connect(this.sfxGain);
+      osc.start(t);
+      osc.stop(t + 0.31);
+    }
+  }
+
+  public playPlanetCollapse() {
+    if (this.isMuted) return;
+    this.initContext();
+    if (!this.ctx || !this.sfxGain) return;
+    const now = this.ctx.currentTime;
+
+    // Deep seismic sub rumble
+    const rumble = this.ctx.createOscillator();
+    const rumbleGain = this.ctx.createGain();
+    rumble.type = 'sawtooth';
+    rumble.frequency.setValueAtTime(70, now);
+    rumble.frequency.exponentialRampToValueAtTime(18, now + 1.8);
+    rumbleGain.gain.setValueAtTime(0.8, now);
+    rumbleGain.gain.exponentialRampToValueAtTime(0.01, now + 1.9);
+
+    rumble.connect(rumbleGain);
+    rumbleGain.connect(this.sfxGain);
+    rumble.start(now);
+    rumble.stop(now + 1.95);
+
+    // Planetary cracking crust noise
+    const crack = this.ctx.createOscillator();
+    const crackGain = this.ctx.createGain();
+    crack.type = 'square';
+    crack.frequency.setValueAtTime(450, now);
+    crack.frequency.exponentialRampToValueAtTime(60, now + 0.8);
+    crackGain.gain.setValueAtTime(0.5, now);
+    crackGain.gain.exponentialRampToValueAtTime(0.01, now + 0.85);
+
+    crack.connect(crackGain);
+    crackGain.connect(this.sfxGain);
+    crack.start(now);
+    crack.stop(now + 0.9);
+  }
+
+  public playSupernovaExplosion() {
+    if (this.isMuted) return;
+    this.initContext();
+    if (!this.ctx || !this.sfxGain) return;
+    const now = this.ctx.currentTime;
+
+    // Stellar implosion-to-explosion blast
+    const blast = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    blast.type = 'triangle';
+    blast.frequency.setValueAtTime(280, now);
+    blast.frequency.exponentialRampToValueAtTime(25, now + 2.2);
+
+    gain.gain.setValueAtTime(0.85, now);
+    gain.gain.exponentialRampToValueAtTime(0.005, now + 2.3);
+
+    blast.connect(gain);
+    gain.connect(this.sfxGain);
+    blast.start(now);
+    blast.stop(now + 2.35);
+
+    // Sizzling plasma shockwave hiss
+    const hiss = this.ctx.createOscillator();
+    const hissGain = this.ctx.createGain();
+    hiss.type = 'sawtooth';
+    hiss.frequency.setValueAtTime(3200, now);
+    hiss.frequency.exponentialRampToValueAtTime(140, now + 1.2);
+    hissGain.gain.setValueAtTime(0.4, now);
+    hissGain.gain.exponentialRampToValueAtTime(0.01, now + 1.25);
+
+    hiss.connect(hissGain);
+    hissGain.connect(this.sfxGain);
+    hiss.start(now);
+    hiss.stop(now + 1.3);
+  }
+
+  public playWormholeWarp() {
+    if (this.isMuted) return;
+    this.initContext();
+    if (!this.ctx || !this.sfxGain) return;
+    const now = this.ctx.currentTime;
+
+    // Ascending hyperspace dimensional warp chords
+    const warpChords = [261.63, 329.63, 392.00, 523.25, 659.25, 783.99, 1046.50, 1318.51];
+    warpChords.forEach((freq, idx) => {
+      const osc = this.ctx!.createOscillator();
+      const gain = this.ctx!.createGain();
+      const t = now + idx * 0.07;
+
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, t);
+      osc.frequency.exponentialRampToValueAtTime(freq * 1.5, t + 0.4);
+
+      gain.gain.setValueAtTime(0.4, t);
+      gain.gain.exponentialRampToValueAtTime(0.005, t + 0.7);
+
+      osc.connect(gain);
+      gain.connect(this.sfxGain!);
+      osc.start(t);
+      osc.stop(t + 0.75);
+    });
+
+    // Sub whoosh
+    const whoosh = this.ctx.createOscillator();
+    const whooshGain = this.ctx.createGain();
+    whoosh.type = 'sawtooth';
+    whoosh.frequency.setValueAtTime(80, now);
+    whoosh.frequency.exponentialRampToValueAtTime(1200, now + 0.9);
+    whooshGain.gain.setValueAtTime(0.6, now);
+    whooshGain.gain.exponentialRampToValueAtTime(0.01, now + 1.0);
+
+    whoosh.connect(whooshGain);
+    whooshGain.connect(this.sfxGain);
+    whoosh.start(now);
+    whoosh.stop(now + 1.05);
   }
 
   public stopAll() {

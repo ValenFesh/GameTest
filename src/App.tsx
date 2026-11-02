@@ -189,6 +189,7 @@ export default function App() {
         engine.stage === 'santiscat_boss' ||
         engine.stage === 'santiscat_boss_wormhole' ||
         engine.stage === 'santiscat_boss_universe';
+      const isCameraWorld = isLevel4 || engine.stage === 'cosmic_escape';
 
       if (engine.stage === 'cinematic_earth_destruction' && engine.cinematic) {
         // Render apocalyptic Earth Destruction cinematic
@@ -197,13 +198,18 @@ export default function App() {
         // Render Santiscat Final Defeat Cinematic (Super bright light, 12 souls, implosion, giant supernova explosion)
         renderer.drawSantiscatDefeatCinematic(engine.santiscatDefeatCinematic, gameTime, engine.player);
       } else {
-        // 1. Background (City, Space nebula or Distorted void)
+        // 1. Background (City, Space nebula, Distorted void, or Cosmic Escape Collapse)
         renderer.drawBackground(engine.stage, gameTime);
 
-        // Apply Camera translation for Level 4 free-roaming world objects
+        // Apply Camera translation for Level 4 & Cosmic Escape free-roaming world objects
         offscreenCtx.save();
-        if (isLevel4) {
+        if (isCameraWorld) {
           offscreenCtx.translate(-engine.camera.x, -engine.camera.y);
+        }
+
+        // Cosmic Escape (Unstable universe collapse corridor, collapsing planets, supernovas, fissures, exit wormhole)
+        if (engine.stage === 'cosmic_escape' && engine.cosmicEscape) {
+          renderer.drawCosmicEscape(engine.cosmicEscape, gameTime, engine.player);
         }
 
         // Level 4 Altar, Glitches & Rhythm Minigame
@@ -267,6 +273,11 @@ export default function App() {
         }
 
         offscreenCtx.restore(); // Restore camera translation
+
+        // 10. Screen-space emergency alarm & red pulsing vignette when cosmic escape timer < 15s
+        if (engine.stage === 'cosmic_escape' && engine.cosmicEscape) {
+          renderer.drawCosmicEscapeScreenVignette(engine.cosmicEscape, gameTime);
+        }
       }
 
       offscreenCtx.restore(); // Restore screen shake
@@ -669,10 +680,13 @@ export default function App() {
           bossBlackFlashesCount={engineRef.current?.stats.bossBlackFlashesCount}
           isSantiscatBattle={
             engineRef.current?.lastBattleStage === 'santiscat_boss' ||
+            engineRef.current?.lastBattleStage === 'santiscat_boss_universe' ||
+            engineRef.current?.lastBattleStage === 'cosmic_escape' ||
             engineRef.current?.santiscat !== null ||
             engineRef.current?.stats.deathReason === 'santiscat_oneshot' ||
             engineRef.current?.stats.deathReason === 'black_hole' ||
-            engineRef.current?.stats.deathReason === 'reality_tear'
+            engineRef.current?.stats.deathReason === 'reality_tear' ||
+            engineRef.current?.stats.deathReason === 'cosmic_collapse'
           }
           onRetry={handleRetry}
           onRetrySantiscat={handleRematchSantiscat}

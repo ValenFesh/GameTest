@@ -5,7 +5,7 @@ import { soundManager } from '../audio/soundManager';
 
 interface GameOverModalProps {
   stage: GameStage;
-  deathReason?: 'standard' | 'gamma_ray' | 'santiscat_oneshot' | 'black_hole' | 'reality_tear';
+  deathReason?: 'standard' | 'gamma_ray' | 'santiscat_oneshot' | 'black_hole' | 'reality_tear' | 'cosmic_collapse';
   bossBlackFlashesCount?: number;
   isSantiscatBattle?: boolean;
   onRetry: () => void;
@@ -26,6 +26,7 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({
   const isSantiscatOneShot = deathReason === 'santiscat_oneshot';
   const isBlackHoleDeath = deathReason === 'black_hole';
   const isRealityTear = deathReason === 'reality_tear';
+  const isCosmicCollapse = deathReason === 'cosmic_collapse' || stage === 'cosmic_escape';
 
   // Ensure gamma sound stops immediately when game over is mounted
   useEffect(() => {
@@ -60,7 +61,9 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({
         </div>
 
         <h2 className="text-2xl md:text-3xl font-black font-display text-red-500 mb-1">
-          {isGammaExtinction
+          {isCosmicCollapse
+            ? '💥 EL UNIVERSO ALTERNO COLAPSÓ 💥'
+            : isGammaExtinction
             ? 'EXTINCIÓN PLANETARIA'
             : isSantiscatOneShot
             ? '¡DESINTEGRACIÓN ONE-SHOT!'
@@ -72,7 +75,9 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({
         </h2>
 
         <p className="text-neutral-300 text-xs md:text-sm mb-4 font-game">
-          {isGammaExtinction
+          {isCosmicCollapse
+            ? 'No lograste llegar a tiempo al agujero de gusano antes de la desintegración del espacio-tiempo.'
+            : isGammaExtinction
             ? 'El estallido de rayos gamma de Nanovalen aniquiló a Catvalen y pulverizó la Tierra.'
             : isSantiscatOneShot
             ? 'La bola de fuego singular de Santiscat es 1-Shot letal al contacto directo.'
@@ -100,7 +105,11 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({
           <Shield className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
           <div>
             <span className="font-bold text-emerald-400">Consejo de Supervivencia:</span>{' '}
-            {isSantiscatOneShot ? (
+            {isCosmicCollapse ? (
+              <span>
+                ¡Tienes <strong>1 minuto (60s)</strong> para huir! Vuela velozmente hacia la derecha (hacia <strong>x = 12,800</strong>) y <strong>activa tu escudo [Shift/K]</strong> para absorber el impacto de las supernovas y planetas en colapso.
+              </span>
+            ) : isSantiscatOneShot ? (
               <span>
                 ¡La bola de fuego de Santiscat es pequeña pero <strong>mata al instante (1-Shot)</strong>! Activa tu <strong>Escudo</strong> [Shift/C] para neutralizarla o mantente a máxima distancia para esquivarla.
               </span>
@@ -131,7 +140,7 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({
         {/* Action Buttons */}
         <div className="flex flex-col gap-2.5">
           {/* Prominent Santiscat Rematch Button when in Level 4 Boss */}
-          {onRetrySantiscat && (isSantiscatBattle || isBlackHoleDeath || isSantiscatOneShot || isRealityTear) && (
+          {onRetrySantiscat && (isSantiscatBattle || isBlackHoleDeath || isSantiscatOneShot || isRealityTear || isCosmicCollapse) && (
             <button
               onClick={() => {
                 soundManager.stopGammaSound();

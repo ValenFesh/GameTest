@@ -587,6 +587,33 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                   💥 CINEMÁTICA FINAL
                 </button>
               </div>
+
+              {/* Instant Test Cosmic Escape (1-minute countdown) */}
+              <div className="p-3.5 bg-neutral-950/80 border border-fuchsia-500/50 rounded-2xl flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-fuchsia-500/20 border border-fuchsia-500/60 flex items-center justify-center text-fuchsia-400 font-black">
+                    ⏱️
+                  </div>
+                  <div>
+                    <div className="text-xs font-black text-white">PROBAR HUIDA CÓSMICA (COLAPSO 1 MINUTO)</div>
+                    <div className="text-[11px] text-neutral-400">
+                      Inicia la huida por el corredor de 13,500m con cuenta regresiva de 60s, supernovas, planetas y agujero de gusano.
+                    </div>
+                  </div>
+                </div>
+
+                <button
+                  onClick={() => {
+                    if (engine) {
+                      engine.testCosmicEscape();
+                      showToast('⏱️ ¡Huida cósmica iniciada!');
+                    }
+                  }}
+                  className="px-4 py-2 rounded-xl bg-gradient-to-r from-fuchsia-600 via-pink-600 to-amber-500 hover:opacity-90 text-white font-black text-xs transition-all shadow-md active:scale-95 cursor-pointer"
+                >
+                  🏃 HUIDA CÓSMICA
+                </button>
+              </div>
             </div>
           )}
 
@@ -648,6 +675,11 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                     id: 'santiscat_boss_universe' as GameStage,
                     title: '🌌 Santiscat Fase 2.5: Otro Universo',
                     desc: 'Combate final por la vida donde el jugador se rehúsa a morir.',
+                  },
+                  {
+                    id: 'cosmic_escape' as GameStage,
+                    title: '🏃 Huida Cósmica: Colapso de 1 Minuto',
+                    desc: 'Fuga contra reloj sorteando planetas colapsando y supernovas hacia el agujero de gusano.',
                   },
                 ].map((s) => (
                   <button

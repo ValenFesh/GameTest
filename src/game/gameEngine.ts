@@ -25,6 +25,11 @@ import {
   JujutsuSummon,
   SantiscatDefeatCinematicState,
   SantiscatDefeatPhase,
+  CosmicEscapeState,
+  CollapsingPlanet,
+  ExplodingStar,
+  RealityFissure,
+  CosmicDebris,
 } from '../types/game';
 import {
   CHARACTER_SKINS,
@@ -86,6 +91,7 @@ export class GameEngine {
   public drones: BossDrone[] = [];
   public cinematic: CinematicState | null = null;
   public santiscatDefeatCinematic: SantiscatDefeatCinematicState | null = null;
+  public cosmicEscape: CosmicEscapeState | null = null;
   public obstacles: Obstacle[] = [];
   public projectiles: Projectile[] = [];
   public particles: Particle[] = [];
@@ -2305,6 +2311,45 @@ export class GameEngine {
       return;
     }
 
+    // Cosmic Escape Sequence (1 minute escape to wormhole after Santiscat's defeat)
+    if (this.stage === 'cosmic_escape' && this.cosmicEscape) {
+      this.updateCamera(delta);
+      this.updatePlayer(delta);
+      this.updateProjectiles(delta);
+      this.updateCosmicEscape(delta);
+      this.updateBlackFlashStrikes(delta);
+      this.updateParticles(delta);
+      this.updateDamageNumbers(delta);
+
+      // Multiplayer State Broadcast (~30Hz)
+      if (this.isMultiplayer) {
+        this.netSyncTimer += delta;
+        if (this.netSyncTimer >= 0.033) {
+          this.netSyncTimer = 0;
+          multiplayerClient.sendPlayerUpdate({
+            x: this.player.x,
+            y: this.player.y,
+            vx: this.player.vx,
+            vy: this.player.vy,
+            facing: this.player.facing,
+            hp: this.player.hp,
+            maxHp: this.player.maxHp,
+            shieldActive: this.player.shieldActive,
+            shieldColor: this.player.shieldColor || '#10b981',
+            eyeState: this.player.eyeState,
+            holdingShield: Boolean(this.player.holdingShield || this.keys['keyk'] || this.keys['shiftleft'] || this.keys['shiftright'] || this.keys['keyc']),
+            greenBeamCharging: this.player.greenBeamCharging,
+            greenBeamFiring: this.player.greenBeamFiring,
+            timeStopActive: this.player.timeStopActive,
+            name: multiplayerClient.currentRoom?.players[this.myPlayerId]?.name || 'Jugador',
+            skin: this.player.skin,
+            isAlive: !this.isSpectating && this.player.hp > 0,
+          });
+        }
+      }
+      return;
+    }
+
     // Transitions
     if (this.stage === 'transition') {
       this.transitionTimer -= delta;
@@ -2588,7 +2633,13 @@ export class GameEngine {
 
     // Clamp inside arena / world
     const margin = 40;
-    const isLevel4 = this.stage === 'distorted' || this.stage === 'rhythm_summon' || this.stage === 'santiscat_boss' || this.stage === 'santiscat_boss_wormhole' || this.stage === 'santiscat_boss_universe';
+    const isLevel4 =
+      this.stage === 'distorted' ||
+      this.stage === 'rhythm_summon' ||
+      this.stage === 'santiscat_boss' ||
+      this.stage === 'santiscat_boss_wormhole' ||
+      this.stage === 'santiscat_boss_universe' ||
+      this.stage === 'cosmic_escape';
     const boundX = isLevel4 ? this.camera.worldWidth - margin : this.width - margin;
     const boundY = isLevel4 ? this.camera.worldHeight - margin : this.height - margin;
     if (p.x < margin) p.x = margin;
@@ -3161,7 +3212,8 @@ export class GameEngine {
       this.stage === 'rhythm_summon' ||
       this.stage === 'santiscat_boss' ||
       this.stage === 'santiscat_boss_wormhole' ||
-      this.stage === 'santiscat_boss_universe';
+      this.stage === 'santiscat_boss_universe' ||
+      this.stage === 'cosmic_escape';
     const maxBoundX = isLevel4 ? this.camera.worldWidth + 150 : this.width + 100;
     const maxBoundY = isLevel4 ? this.camera.worldHeight + 150 : this.height + 100;
     this.projectiles = this.projectiles.filter(p => p.duration < p.maxDuration && p.x > -150 && p.x < maxBoundX && p.y > -150 && p.y < maxBoundY);
@@ -3876,7 +3928,13 @@ export class GameEngine {
   // =========================================================================
 
   private updateCamera(delta: number) {
-    const isLevel4 = this.stage === 'distorted' || this.stage === 'rhythm_summon' || this.stage === 'santiscat_boss' || this.stage === 'santiscat_boss_wormhole' || this.stage === 'santiscat_boss_universe';
+    const isLevel4 =
+      this.stage === 'distorted' ||
+      this.stage === 'rhythm_summon' ||
+      this.stage === 'santiscat_boss' ||
+      this.stage === 'santiscat_boss_wormhole' ||
+      this.stage === 'santiscat_boss_universe' ||
+      this.stage === 'cosmic_escape';
 
     let focusX = this.player.x;
     let focusY = this.player.y;
@@ -5852,17 +5910,426 @@ export class GameEngine {
         this.player.y += Math.sin(pAng) * force;
       }
     }
-    // Phase 5: Fade to Victory Modal
+    // Phase 5: Spacetime collapses - Initiate 1-minute Cosmic Escape to Wormhole!
     else {
       c.phase = 'fade_to_victory';
-      this.triggerVictory(true);
+      this.startCosmicEscape(true);
     }
   }
 
   public skipSantiscatDefeatCinematic() {
     if (this.stage === 'cinematic_santiscat_defeat') {
-      this.triggerVictory(true);
+      this.startCosmicEscape(true);
     }
+  }
+
+  // =========================================================================
+  // CATACLYSMIC COSMIC ESCAPE SEQUENCE (1-MINUTE RACE TO THE WORMHOLE)
+  // =========================================================================
+
+  public startCosmicEscape(broadcast: boolean = true) {
+    this.stage = 'cosmic_escape';
+    this.lastBattleStage = 'cosmic_escape';
+    this.santiscatDefeatCinematic = null;
+    this.boss = null;
+    this.santiscat = null;
+    this.obstacles = [];
+    this.projectiles = [];
+    this.drones = [];
+
+    // Giant cosmic world: 13,500px length by 2,200px height
+    this.camera.worldWidth = 13500;
+    this.camera.worldHeight = 2200;
+
+    // Reset player position at escape departure point
+    this.player.x = 400;
+    this.player.y = 1100;
+    this.player.vx = 0;
+    this.player.vy = 0;
+    this.player.facing = 1;
+
+    // Exit wormhole destination
+    const wormholeX = 12800;
+    const wormholeY = 1100;
+    const wormholeRadius = 220;
+
+    // 14 Collapsing Planets with magma veins & tumbling fragments
+    const planets: CollapsingPlanet[] = [];
+    const planetColors = [
+      { color: '#3b82f6', crust: '#1e3a8a', magma: '#f97316' },
+      { color: '#10b981', crust: '#064e3b', magma: '#ef4444' },
+      { color: '#8b5cf6', crust: '#4c1d95', magma: '#ec4899' },
+      { color: '#f59e0b', crust: '#78350f', magma: '#dc2626' },
+      { color: '#06b6d4', crust: '#164e63', magma: '#fbbf24' },
+    ];
+
+    for (let i = 0; i < 14; i++) {
+      const pX = 900 + i * 820 + (Math.random() - 0.5) * 200;
+      const pY = 250 + (i % 2 === 0 ? 1 : -1) * (300 + Math.random() * 250) + 850;
+      const theme = planetColors[i % planetColors.length];
+      const rad = 85 + Math.random() * 65;
+      planets.push({
+        id: `planet_${i}`,
+        x: pX,
+        y: Math.max(220, Math.min(1980, pY)),
+        radius: rad,
+        color: theme.color,
+        crustColor: theme.crust,
+        magmaColor: theme.magma,
+        crackProgress: 0.2 + Math.random() * 0.35,
+        collapseTimer: 60 - i * 3.5,
+        exploded: false,
+        debrisCount: Math.floor(rad / 10),
+        rotation: Math.random() * Math.PI * 2,
+        rotationSpeed: (Math.random() - 0.5) * 0.8,
+      });
+    }
+
+    // 18 Exploding Stars / Supernovas
+    const starColors = ['#f59e0b', '#ef4444', '#38bdf8', '#c084fc', '#ec4899'];
+    const explodingStars: ExplodingStar[] = [];
+    for (let i = 0; i < 18; i++) {
+      const sX = 700 + i * 650 + (Math.random() - 0.5) * 180;
+      const sY = 200 + Math.random() * 1800;
+      const baseR = 60 + Math.random() * 50;
+      explodingStars.push({
+        id: `star_${i}`,
+        x: sX,
+        y: sY,
+        radius: baseR,
+        maxRadius: baseR,
+        color: starColors[i % starColors.length],
+        coreColor: '#ffffff',
+        phase: (i % 3 === 0 ? 'imploding' : 'pulsing') as any,
+        timer: Math.random() * 2.5,
+        cycleTimer: 2.8 + Math.random() * 2.0,
+        shockwaveRadius: 0,
+        maxShockwaveRadius: baseR * 3.2,
+        shockwaveActive: false,
+      });
+    }
+
+    // 24 Reality Fissures
+    const fissures: RealityFissure[] = [];
+    for (let i = 0; i < 24; i++) {
+      const fX = 800 + i * 480 + (Math.random() - 0.5) * 150;
+      const fY = 300 + Math.random() * 1600;
+      const angle = (Math.random() - 0.5) * Math.PI * 0.8;
+      const len = 250 + Math.random() * 250;
+      fissures.push({
+        id: `fissure_${i}`,
+        x1: fX - Math.cos(angle) * (len / 2),
+        y1: fY - Math.sin(angle) * (len / 2),
+        x2: fX + Math.cos(angle) * (len / 2),
+        y2: fY + Math.sin(angle) * (len / 2),
+        width: 22 + Math.random() * 14,
+        pulseTimer: Math.random() * Math.PI * 2,
+        color: i % 2 === 0 ? '#ec4899' : '#8b5cf6',
+        glowColor: i % 2 === 0 ? '#f43f5e' : '#38bdf8',
+        damage: 26,
+      });
+    }
+
+    // 35 Cosmic Debris Fragments
+    const debris: CosmicDebris[] = [];
+    const debrisColors = ['#64748b', '#78716c', '#ef4444', '#f59e0b', '#3b82f6'];
+    for (let i = 0; i < 35; i++) {
+      debris.push({
+        id: `debris_${i}`,
+        x: 600 + Math.random() * 12000,
+        y: 100 + Math.random() * 2000,
+        vx: -2.5 - Math.random() * 3.5,
+        vy: (Math.random() - 0.5) * 2.0,
+        radius: 12 + Math.random() * 20,
+        color: debrisColors[i % debrisColors.length],
+        rotation: Math.random() * Math.PI * 2,
+        rotSpeed: (Math.random() - 0.5) * 3.0,
+      });
+    }
+
+    this.cosmicEscape = {
+      active: true,
+      timer: 60.0,
+      maxTimer: 60.0,
+      worldWidth: 13500,
+      worldHeight: 2200,
+      wormholeX,
+      wormholeY,
+      wormholeRadius,
+      wormholeAngle: 0,
+      planets,
+      explodingStars,
+      fissures,
+      debris,
+      escapeDistanceTotal: wormholeX - 400,
+      escaped: false,
+      escapeWarpTimer: 0,
+      warningSoundPlayed: true,
+    };
+
+    // Audio: start alarm & epic escape soundtrack!
+    soundManager.stopGammaSound();
+    soundManager.playEscapeWarningAlarm();
+    soundManager.playMusic('cosmic_escape');
+
+    this.screenShake = 35;
+    this.damageNumbers.push({
+      id: Math.random().toString(),
+      text: '⚠️ ¡EL UNIVERSO ALTERNO COLAPSA! ¡HUYE AL AGUJERO DE GUSANO! (1:00) ⚠️',
+      x: this.player.x,
+      y: this.player.y - 65,
+      vy: -1.2,
+      color: '#f43f5e',
+      isBlackFlash: true,
+      life: 4.5,
+      maxLife: 4.5,
+      scale: 1.6,
+    });
+
+    if (broadcast && this.isMultiplayer && this.isHostPlayer()) {
+      multiplayerClient.sendStageChange('cosmic_escape', 0);
+    }
+  }
+
+  public updateCosmicEscape(delta: number) {
+    if (!this.cosmicEscape || !this.cosmicEscape.active) return;
+    const esc = this.cosmicEscape;
+    const p = this.player;
+
+    // Wormhole rotation
+    esc.wormholeAngle += delta * 2.8;
+
+    // If already in warp animation to return home
+    if (esc.escaped) {
+      esc.escapeWarpTimer += delta;
+      p.vx = 0;
+      p.vy = 0;
+      p.x += (esc.wormholeX - p.x) * 0.14;
+      p.y += (esc.wormholeY - p.y) * 0.14;
+
+      // Spawn portal entry particles
+      for (let i = 0; i < 4; i++) {
+        const ang = Math.random() * Math.PI * 2;
+        const rad = Math.random() * esc.wormholeRadius;
+        this.particles.push({
+          x: esc.wormholeX + Math.cos(ang) * rad,
+          y: esc.wormholeY + Math.sin(ang) * rad,
+          vx: -Math.cos(ang) * 12,
+          vy: -Math.sin(ang) * 12,
+          size: Math.random() * 6 + 3,
+          color: Math.random() > 0.5 ? '#38bdf8' : '#c084fc',
+          life: 0.35,
+          maxLife: 0.35,
+          alpha: 1,
+          shape: 'spark',
+        });
+      }
+
+      if (esc.escapeWarpTimer >= 1.8) {
+        this.triggerVictory(true);
+      }
+      return;
+    }
+
+    // 1-minute countdown
+    esc.timer = Math.max(0, esc.timer - delta);
+
+    // Urgent alarm when timer < 15s
+    if (esc.timer < 15 && Math.floor(esc.timer) !== Math.floor(esc.timer + delta)) {
+      soundManager.playEscapeWarningAlarm();
+    }
+
+    // Timer ran out: Universal Cataclysmic Collapse!
+    if (esc.timer <= 0) {
+      this.failCosmicEscape();
+      return;
+    }
+
+    // Update Collapsing Planets
+    esc.planets.forEach(pl => {
+      pl.rotation += pl.rotationSpeed * delta;
+      pl.crackProgress = Math.min(1.0, pl.crackProgress + delta * 0.015);
+
+      // Planet magma sparks
+      if (Math.random() < 0.35) {
+        const a = Math.random() * Math.PI * 2;
+        this.particles.push({
+          x: pl.x + Math.cos(a) * pl.radius,
+          y: pl.y + Math.sin(a) * pl.radius,
+          vx: Math.cos(a) * (Math.random() * 3 + 1),
+          vy: Math.sin(a) * (Math.random() * 3 + 1),
+          size: Math.random() * 5 + 2,
+          color: pl.magmaColor,
+          life: 0.45,
+          maxLife: 0.45,
+          alpha: 1,
+          shape: 'spark',
+        });
+      }
+
+      // Check collision with player
+      const dist = Math.hypot(p.x - pl.x, p.y - pl.y);
+      if (dist < pl.radius + p.width * 0.4) {
+        if (p.shieldActive) {
+          soundManager.playShieldAbsorb();
+          this.progressQuest('shield_guardian', 1);
+          // Push player away from planet safely
+          const ang = Math.atan2(p.y - pl.y, p.x - pl.x);
+          p.x = pl.x + Math.cos(ang) * (pl.radius + p.width * 0.45 + 5);
+          p.y = pl.y + Math.sin(ang) * (pl.radius + p.height * 0.45 + 5);
+        } else {
+          this.takePlayerDamage(24, 'collision');
+          const ang = Math.atan2(p.y - pl.y, p.x - pl.x);
+          p.x += Math.cos(ang) * 18;
+          p.y += Math.sin(ang) * 18;
+        }
+      }
+    });
+
+    // Update Exploding Stars & Supernovas
+    esc.explodingStars.forEach(st => {
+      st.timer += delta;
+
+      if (st.phase === 'pulsing') {
+        st.radius = st.maxRadius * (1.0 + Math.sin(st.timer * 4.5) * 0.15);
+        if (st.timer >= st.cycleTimer) {
+          st.phase = 'imploding';
+          st.timer = 0;
+          soundManager.playCosmicImplosion();
+        }
+      } else if (st.phase === 'imploding') {
+        // Gravitational collapse into tiny dense point
+        st.radius = Math.max(8, st.maxRadius * (1.0 - (st.timer / 0.8) * 0.85));
+        if (st.timer >= 0.8) {
+          st.phase = 'supernova_blast';
+          st.timer = 0;
+          st.shockwaveRadius = st.radius;
+          st.shockwaveActive = true;
+          soundManager.playSupernovaExplosion();
+          this.screenShake = Math.max(this.screenShake, 18);
+        }
+      } else if (st.phase === 'supernova_blast') {
+        // Expanding blast shockwave
+        st.shockwaveRadius += delta * 450;
+
+        // Check shockwave collision with player
+        const dist = Math.hypot(p.x - st.x, p.y - st.y);
+        if (Math.abs(dist - st.shockwaveRadius) < 35 && st.shockwaveActive) {
+          if (p.shieldActive) {
+            soundManager.playShieldAbsorb();
+            this.progressQuest('shield_guardian', 1);
+            this.spawnHitParticles(p.x, p.y, '#34d399', 12);
+          } else {
+            this.takePlayerDamage(35, 'laser');
+            this.spawnHitParticles(p.x, p.y, st.color, 16);
+          }
+        }
+
+        if (st.shockwaveRadius >= st.maxShockwaveRadius) {
+          st.phase = 'pulsing';
+          st.timer = 0;
+          st.shockwaveActive = false;
+          st.radius = st.maxRadius;
+        }
+      }
+    });
+
+    // Update Reality Fissures
+    esc.fissures.forEach(f => {
+      f.pulseTimer += delta * 4;
+
+      // Distance from player to line segment (x1, y1) to (x2, y2)
+      const px = p.x;
+      const py = p.y;
+      const ldx = f.x2 - f.x1;
+      const ldy = f.y2 - f.y1;
+      const lenSq = ldx * ldx + ldy * ldy || 1;
+      const t = Math.max(0, Math.min(1, ((px - f.x1) * ldx + (py - f.y1) * ldy) / lenSq));
+      const projX = f.x1 + t * ldx;
+      const projY = f.y1 + t * ldy;
+      const dist = Math.hypot(px - projX, py - projY);
+
+      if (dist < f.width / 2 + p.width * 0.35) {
+        if (p.shieldActive) {
+          soundManager.playShieldAbsorb();
+          this.progressQuest('shield_guardian', 1);
+          this.spawnHitParticles(p.x, p.y, '#34d399', 4);
+        } else {
+          this.takePlayerDamage(20, 'collision');
+          this.spawnHitParticles(p.x, p.y, f.color, 6);
+        }
+      }
+    });
+
+    // Update Cosmic Debris
+    esc.debris.forEach(deb => {
+      deb.x += deb.vx * delta * 60;
+      deb.y += deb.vy * delta * 60;
+      deb.rotation += deb.rotSpeed * delta;
+
+      // Wrap debris within cosmic boundaries
+      if (deb.x < p.x - 1200) deb.x = p.x + 1200;
+      if (deb.y < 0) deb.y = esc.worldHeight;
+      if (deb.y > esc.worldHeight) deb.y = 0;
+
+      const dist = Math.hypot(p.x - deb.x, p.y - deb.y);
+      if (dist < deb.radius + p.width * 0.4) {
+        if (p.shieldActive) {
+          soundManager.playShieldAbsorb();
+          this.progressQuest('shield_guardian', 1);
+          deb.vx *= -1;
+          deb.vy *= -1;
+        } else {
+          this.takePlayerDamage(15, 'collision');
+          deb.vx *= -1;
+        }
+      }
+    });
+
+    // Wormhole Check
+    const distToWormhole = Math.hypot(p.x - esc.wormholeX, p.y - esc.wormholeY);
+
+    // Gravitational suction when getting close to wormhole
+    if (distToWormhole < 650) {
+      const suctionStrength = (1 - distToWormhole / 650) * 8.5;
+      const pullAngle = Math.atan2(esc.wormholeY - p.y, esc.wormholeX - p.x);
+      p.x += Math.cos(pullAngle) * suctionStrength;
+      p.y += Math.sin(pullAngle) * suctionStrength;
+    }
+
+    // Enter wormhole: Escape Successful!
+    if (distToWormhole < esc.wormholeRadius * 0.65) {
+      esc.escaped = true;
+      esc.escapeWarpTimer = 0;
+      soundManager.playWormholeWarp();
+      this.screenShake = 45;
+
+      this.damageNumbers.push({
+        id: Math.random().toString(),
+        text: '🌀 ¡HAS ATRAVESADO EL AGUJERO DE GUSANO! REGRESANDO A CASA... 🌀',
+        x: p.x,
+        y: p.y - 50,
+        vy: -1.4,
+        color: '#38bdf8',
+        isBlackFlash: true,
+        life: 3.5,
+        maxLife: 3.5,
+        scale: 1.6,
+      });
+    }
+  }
+
+  public failCosmicEscape() {
+    soundManager.stopMusic();
+    soundManager.playEarthDestruction();
+    this.screenShake = 60;
+    this.stats.deathReason = 'cosmic_collapse';
+    this.player.hp = 0;
+    this.triggerGameOver();
+  }
+
+  public testCosmicEscape() {
+    this.startCosmicEscape(false);
   }
 
   // --- CHEAT / TEST HELPERS FOR ADMIN PANEL ---

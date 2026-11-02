@@ -13,7 +13,8 @@ export type GameStage =
   | 'rhythm_summon'
   | 'santiscat_boss'
   | 'santiscat_boss_wormhole'
-  | 'santiscat_boss_universe';
+  | 'santiscat_boss_universe'
+  | 'cosmic_escape';
 
 export type CharacterSkinId =
   | 'catvalen'
@@ -279,7 +280,7 @@ export interface GameStats {
   bossBlackFlashesCount: number;
   totalAttacksLanded: number;
   timeElapsed: number; // seconds
-  deathReason?: 'standard' | 'gamma_ray' | 'santiscat_oneshot' | 'black_hole' | 'reality_tear';
+  deathReason?: 'standard' | 'gamma_ray' | 'santiscat_oneshot' | 'black_hole' | 'reality_tear' | 'cosmic_collapse';
   nanovalenWins?: number;
   santiscatWins?: number;
   unlockedSkinNotice?: string;
@@ -646,5 +647,87 @@ export interface SantiscatBoss {
   omegaSave: OmegaSaveFile;
   refusedToDie: RefusedToDieState;
 }
+
+// =========================================================================
+// COSMIC ESCAPE SEQUENCE (AFTER SANTISCAT DEFEAT)
+// =========================================================================
+
+export interface CollapsingPlanet {
+  id: string;
+  x: number;
+  y: number;
+  radius: number;
+  color: string;
+  crustColor: string;
+  magmaColor: string;
+  crackProgress: number; // 0 to 1
+  collapseTimer: number;
+  exploded: boolean;
+  debrisCount: number;
+  rotation: number;
+  rotationSpeed: number;
+}
+
+export interface ExplodingStar {
+  id: string;
+  x: number;
+  y: number;
+  radius: number;
+  maxRadius: number;
+  color: string;
+  coreColor: string;
+  phase: 'pulsing' | 'imploding' | 'supernova_blast';
+  timer: number;
+  cycleTimer: number;
+  shockwaveRadius: number;
+  maxShockwaveRadius: number;
+  shockwaveActive: boolean;
+}
+
+export interface RealityFissure {
+  id: string;
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  width: number;
+  pulseTimer: number;
+  color: string;
+  glowColor: string;
+  damage: number;
+}
+
+export interface CosmicDebris {
+  id: string;
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  radius: number;
+  color: string;
+  rotation: number;
+  rotSpeed: number;
+}
+
+export interface CosmicEscapeState {
+  active: boolean;
+  timer: number; // 60.0s countdown
+  maxTimer: number; // 60.0s
+  worldWidth: number; // 13,500px
+  worldHeight: number; // 2,200px
+  wormholeX: number; // 12,800px
+  wormholeY: number; // 1,100px
+  wormholeRadius: number; // 220px
+  wormholeAngle: number;
+  planets: CollapsingPlanet[];
+  explodingStars: ExplodingStar[];
+  fissures: RealityFissure[];
+  debris: CosmicDebris[];
+  escapeDistanceTotal: number;
+  escaped: boolean;
+  escapeWarpTimer: number;
+  warningSoundPlayed?: boolean;
+}
+
 
 
